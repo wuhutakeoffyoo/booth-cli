@@ -64,3 +64,12 @@ booth shop mukumi --json
 - 个别店铺（如 vrcalphabet）开了 Cloudflare 盾，无法抓取，会报错提示。
 - 未登录功能（收藏/购物车/已购下载）不在此工具范围。
 - 请遵守 Booth 利用条款：请求间隔 ≥1 秒，勿高并发抓取。
+
+## 环境要求
+
+Python 3.8+，无第三方依赖。Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
+
+## 许可证
+
+MIT — 见 [LICENSE](LICENSE)。
+
