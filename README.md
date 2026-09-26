@@ -69,7 +69,18 @@ booth shop mukumi --json
 
 Python 3.8+，无第三方依赖。Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
 
+## AI Agent 技能文档
+
+[skill/SKILL.md](skill/SKILL.md) 是给 AI agent 用的技能说明，沉淀了三套实战验证的流程：
+
+1. **基础用法**——搜索/详情/商店的推荐调用方式（一律 `--json`）
+2. **多商品对比**——三轴关键词探测 + 缺席检查 + 五层维度对比（事实/能力/成本/信号/结论）
+3. **以图找品**——读图提词 → 两轴搜索取交集 → 下载商品图视觉比对（含 pximg Referer 与缩略图 URL 改写技巧）
+
+安装方法：把 `skill/` 目录复制为各 agent 的技能目录下的 `booth/`（如 `~/.zcode/skills/booth`、`~/.agents/skills/booth`、`~/.codex/skills/booth`）。
+
 ## 许可证
 
 MIT — 见 [LICENSE](LICENSE)。
+
 
