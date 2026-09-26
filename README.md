@@ -17,7 +17,7 @@ Booth 无官方公开 API；调研过的开源项目（boothmate / BoothPM-SDK /
 | 单品 | `https://booth.pm/ja/items/{id}.json` |
 | 商店 | `https://{sub}.booth.pm/items` （仅少量服务端渲染，见限制） |
 
-年龄门用 cookie `adult=t` 绕过；R-18 结果由 `adult` 参数独立控制（默认排除）。
+年龄门用 cookie `adult=t` 绕过；R-18 由 `adult` 参数控制，默认 `include` **联合搜索**（Booth 的 R-18 为一元标记，情色与怪诞/R18G 类同旗、无独立过滤），结果里每件商品带 `is_adult` 标记。
 
 ## 用法
 
@@ -47,7 +47,7 @@ booth shop mukumi --json
 |---|---|
 | `--sort` | `new`(新着) `popularity`(人气) `liked`(收藏) `price_asc` `price_desc` |
 | `--type` | `all` / `digital`(下载品) / `physical`(实体) |
-| `--adult` | `exclude`(默认) / `include` / `only` |
+| `--adult` | `include`(默认，联合搜索) / `exclude`(仅全年齢) / `only`(仅R-18) |
 | `--tag NAME` | 标签过滤，可多次；`--vrc` 等价 `--tag VRChat` |
 | `--or-word W` / `--exclude W` | OR 词 / 排除词，可多次 |
 | `--min-price` / `--max-price` | 价格区间（日元） |

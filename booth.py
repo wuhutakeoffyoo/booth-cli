@@ -487,8 +487,8 @@ def build_parser():
                     help="排序: new=新着 popularity=人气 liked=收藏(默认 new)")
     ps.add_argument("--type", default="all", choices=TYPES,
                     help="商品类型: digital=下载品 physical=实体(默认 all)")
-    ps.add_argument("--adult", default="exclude", choices=("exclude", "include", "only"),
-                    help="R-18: exclude=排除(默认) include=包含 only=只看")
+    ps.add_argument("--adult", default="include", choices=("exclude", "include", "only"),
+                    help="R-18: include=联合搜索(默认,结果带 is_adult 标记) exclude=仅全年齢 only=仅R-18")
     ps.add_argument("--tag", action="append", help="按标签过滤，可多次")
     ps.add_argument("--vrc", action="store_true", help="等价 --tag VRChat")
     ps.add_argument("--or-word", action="append", help="OR 关键词，可多次")

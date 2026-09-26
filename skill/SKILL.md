@@ -78,7 +78,8 @@ booth shop mukumi --json
 
 ## 注意
 
-- `--sort`: new / popularity / liked / price_asc / price_desc；`--type`: all / digital / physical；`--adult`: exclude(默认) / include / only。
+- `--sort`: new / popularity / liked / price_asc / price_desc；`--type`: all / digital / physical；`--adult`: **include(默认，联合搜索)** / exclude(仅全年齢) / only(仅R-18)。
+- **R-18 说明**：Booth 的 R-18 是一元标记（情色与怪诞/R18G 类同旗，平台无独立 R18G 过滤），默认联合搜索，结果每件带 `is_adult`；展示给用户时对 adult 商品标注 R-18；要收窄怪诞向只能靠自由标签（如 `--tag グロ`，覆盖不全）。
 - `--category` 的 slug 必须是日语原文：`3Dキャラクター`、`3D衣装`、`3D小道具`、`3D装飾品`、`3Dテクスチャ`、`3D髪型`、`3D靴`、`VRoid` 等。
 - 多页用 `--pages N`（每次间隔约 1.2s，自动限速），配合 `--limit` 控制总量。
 - `shop` 命令多数店铺只能取到最新几件（列表由前端渲染）；找某店商品改用 `search "店铺名"`。
