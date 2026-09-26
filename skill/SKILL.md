@@ -56,7 +56,17 @@ booth shop mukumi --json
 
 ## 以图找品（拿到商品图反查 Booth 商品）
 
-适用：用户给一张商品图（转卖图/截图）要找原商品。前提：当前 agent 具备看图能力；纯文字终端无法做视觉比对，只能走第 1、2 步给出候选。
+**首选 `booth imgsearch`**（Bing 视觉搜索 + 派生词关键词自动合并；需 playwright 与本机 Chrome，运行时会弹出浏览器窗口，属正常现象）：
+
+```bash
+booth imgsearch 图片.jpg --json                                    # 本地图片
+booth imgsearch "https://booth.pximg.net/..." --json               # booth 官方图床 URL 也可以
+```
+
+返回 `derived_query`（Bing 从图里读出的文字，常就是商品名）与 matches（视觉候选前 2 + 派生词关键词命中）。
+实测：有名字的图 Top1 率极高；无字图也能救回一部分（水中ソックス、P♡P.Hair 04 均为 imgsearch Top1）。
+
+以下手动流程在 imgsearch 无果或候选可疑时使用（前提：当前 agent 具备看图能力；纯文字终端无法做视觉比对，只能走第 1、2 步给出候选）。
 
 1. **读图提词**：优先提取图内文字——商品名（英文/片假名）、"Original Avatar" 类字样、店铺水印、活动 logo，这是最强关键词；同时记下外观特征（发型发色/瞳色/服装配色/配饰/构图）供最终比对。
 2. **CLI 搜索**：片假名与罗马字各搜一次并取交集，同名子串噪音大时加分类过滤：

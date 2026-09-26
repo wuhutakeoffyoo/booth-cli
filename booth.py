@@ -18,8 +18,11 @@ import gzip
 import html as html_mod
 import json
 import re
+import os
 import sys
+import tempfile
 import time
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -138,6 +141,20 @@ def get_html(url):
 def get_json(url, csrf=None):
     data, _, _ = http_get(url, json_accept=True, csrf=csrf)
     return json.loads(data.decode("utf-8", errors="replace"))
+
+
+def download_image(url):
+    """下载 booth 官方图床（booth.pm / booth.pximg.net）的 JPEG 到本地字节。"""
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or not (
+            host == "booth.pm" or host.endswith(".booth.pm") or host == "booth.pximg.net"):
+        raise BoothError(f"图片 URL 超出许可范围（仅允许 booth 官方图床）: {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://booth.pm/"})
+    data = _OPENER.open(req, timeout=30).read()
+    if data[:2] != b"\xff\xd8":
+        raise BoothError("目标不是有效 JPEG 图片")
+    return data
 
 
 # ---------------------------------------------------------------- 解析工具
@@ -472,6 +489,111 @@ def cmd_shop(args):
         print(f"    {it['url']}")
 
 
+def cmd_imgsearch(args):
+    src = " ".join(args.image).strip()
+    tmp_path = None
+    if re.match(r"^https?://", src, re.I):
+        data = download_image(src)
+        tf = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+        tf.write(data)
+        tf.close()
+        path = tf.name
+        tmp_path = tf.name
+    else:
+        path = src.strip('"')
+        if not Path(path).is_file():
+            raise BoothError(f"本地图片不存在: {path}（也支持 booth 官方图床的图片 URL）")
+
+    try:
+        from reverse_search import bing_search, ascii2d_search
+    except ImportError:
+        raise BoothError("需要 playwright: pip install playwright && playwright install chrome")
+
+    engines = [e.strip() for e in args.engine.split(",") if e.strip()]
+    ordered, via, derived = [], {}, ""
+    for eng in engines:
+        try:
+            if eng == "bing":
+                ids, derived, _ = bing_search(path)
+            elif eng == "ascii2d":
+                ids, _ = ascii2d_search(path)
+            else:
+                continue
+        except Exception as e:
+            print(f"警告: {eng} 引擎失败: {str(e)[:120]}", file=sys.stderr)
+            continue
+        for iid in ids:
+            if iid not in via:
+                via[iid] = eng
+                ordered.append(iid)
+        print(f"[{eng}] 候选 {len(ids)} 个: {ids[:8]}", file=sys.stderr)
+        if ordered and eng == "bing":
+            break
+
+    if not ordered and derived:
+        # 图搜没给 booth 直链时，用引擎派生的关键词兜底走关键词搜索
+        kw = derived.strip()
+        print(f"提示: 图搜无直链，改用派生词搜索: {kw}", file=sys.stderr)
+        page_html, _ = get_html(
+            BASE + "/ja/search/" + urllib.parse.quote(kw, safe="") + "?sort=popularity&adult=include")
+        res = parse_search_page(page_html)
+        ordered = [it["id"] for it in res["items"][:args.limit]]
+        via = {i: "bing-query" for i in ordered}
+
+    if ordered and derived:
+        # 派生词常就是商品名（Bing 会读图内文字）——必做关键词合并，取非 CJK 词元避免语义稀释
+        latin = " ".join(re.findall(r"[^\s\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]+", derived)).strip()
+        if latin:
+            try:
+                page_html, _ = get_html(
+                    BASE + "/ja/search/" + urllib.parse.quote(latin, safe="") + "?sort=popularity&adult=include")
+                res = parse_search_page(page_html)
+                for it in res["items"]:
+                    iid = it["id"]
+                    if iid not in via:
+                        via[iid] = "derived-search"
+                        ordered.append(iid)
+                print(f"[derived] 关键词合并 {len(res['items'])} 个: {latin!r}", file=sys.stderr)
+            except BoothError as e:
+                print(f"警告: 派生词搜索失败: {str(e)[:80]}", file=sys.stderr)
+
+    # 排序：视觉命中前2 → 派生词关键词命中 → 其余视觉候选
+    visual = [i for i in ordered if via.get(i, "").startswith("bing")]
+    kw = [i for i in ordered if not via.get(i, "").startswith("bing")]
+    ordered = visual[:2] + kw + visual[2:]
+
+    if not ordered:
+        raise BoothError("反向搜图未发现任何 booth 关联（引擎: " + ",".join(engines) + "）")
+
+    matches = []
+    for iid in ordered[:args.limit]:
+        try:
+            raw = fetch_item(str(iid), "ja")
+            m = trim_item(raw, desc_len=200)
+        except BoothError:
+            m = {"id": iid, "name": None, "price": None, "url": f"{BASE}/ja/items/{iid}"}
+        m["via"] = via.get(iid, "")
+        matches.append(m)
+        time.sleep(1.0)
+
+    if tmp_path:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    payload = {"image": src, "engines": engines, "derived_query": derived,
+               "match_count": len(matches), "matches": matches}
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    print(f"反向搜图命中 {len(matches)} 个候选" +
+          (f"（引擎派生词: {derived}）" if derived else "") + "：\n")
+    for m in matches:
+        print(f"#{m.get('id')}  {m.get('price') or ''}  {m.get('name') or '(详情获取失败)'}  [{m.get('via')}]")
+        print(f"    {m.get('url')}")
+
+
 # ---------------------------------------------------------------- CLI
 
 def build_parser():
@@ -517,6 +639,15 @@ def build_parser():
     ph.add_argument("--pages", type=int, default=1)
     ph.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
     ph.set_defaults(func=cmd_shop)
+
+    pi2 = sub.add_parser("imgsearch", help="以图搜品（Lens/ascii2d 反向搜图，需 playwright）",
+                         aliases=["is"])
+    pi2.add_argument("image", nargs="+", help="本地图片路径 或 booth 官方图床的图片 URL")
+    pi2.add_argument("--engine", default="lens,ascii2d",
+                     help="引擎与顺序（默认 lens,ascii2d；首个引擎有结果时可跳过第二个）")
+    pi2.add_argument("--limit", type=int, default=5, help="最多返回候选数（默认 5）")
+    pi2.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    pi2.set_defaults(func=cmd_imgsearch)
 
     return p
 
