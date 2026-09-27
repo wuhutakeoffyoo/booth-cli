@@ -19,8 +19,8 @@
 """
 
 import base64
+import http.cookiejar
 import ipaddress
-import json
 import re
 import socket
 import time
@@ -38,7 +38,6 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 # 永不进入主机名/路径；请求前做 https+主机白名单+DNS 解析边界校验，重定向一律拒绝。
 _BING_HOST = "www.bing.com"
 _BING_UPLOAD_PATH = "/images/search?view=detailv2&iss=sbiupload"
-_BING_INSIGHTS_PATH = "/images/api/custom/knowledge"
 _BING_SIG_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIGd3gMN2v1KRLBGmotz7jbQYF8PaB+Jpe6iVf2YIeN5b"
 
 
@@ -47,7 +46,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_BING_OPENER = urllib.request.build_opener(_NoRedirect)
+# 会话 Cookie 必须跨请求保持：上传 302 下发的 Cookie 是后续 detailV2 跳转的通行证
+_BING_COOKIES = http.cookiejar.CookieJar()
+_BING_OPENER = urllib.request.build_opener(
+    _NoRedirect, urllib.request.HTTPCookieProcessor(_BING_COOKIES))
 
 
 def _validated_bing_url(url):
@@ -133,25 +135,6 @@ def _bing_post(path, query=None, body=b"", content_type=None,
         return e.code, url, "", e.headers.get("Location")
 
 
-def _derived_from_insights(data):
-    """从 insights JSON 里提取派生关键词（Bing 对图片内容的文字描述）。"""
-    texts = []
-    try:
-        j = json.loads(data)
-    except json.JSONDecodeError:
-        return ""
-    for g in j.get("bestGuess") or []:
-        t = (g or {}).get("text")
-        if t:
-            texts.append(t)
-    vs = j.get("visualSearch") or {}
-    for r in vs.get("relatedSearches") or []:
-        t = (r or {}).get("text")
-        if t:
-            texts.append(t)
-    return " ".join(texts).strip()
-
-
 def _bing_get(path_or_url, timeout=30):
     """GET Bing 页面（拒绝重定向跟随，返回 (status, final_url, text, location)）。"""
     url = path_or_url if path_or_url.startswith("https://") else "https://" + _BING_HOST + path_or_url
@@ -170,7 +153,8 @@ def _bing_get(path_or_url, timeout=30):
 
 
 def _bing_upload(image_path):
-    """multipart 上传图片，返回 (bcid, blob_url)。上传成功时 Bing 以 302 下发 bcid。"""
+    """multipart 上传图片，返回 (bcid, redirect_location)。
+    上传成功时 Bing 以 302 下发 bcid 与 detailV2 跳转地址。"""
     image_b64 = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
     body, ctype = _multipart([("cbir", "sbi"), ("imageBin", image_b64)])
     status, _, text, loc = _bing_post(_BING_UPLOAD_PATH, body=body, content_type=ctype)
@@ -180,52 +164,42 @@ def _bing_upload(image_path):
     bcid_m = re.search(r"bcid_[A-Za-z0-9\-.]+", hay)
     if not bcid_m:
         raise RuntimeError("Bing 上传响应缺少 bcid（可能被风控，走 playwright 备援）")
-    blob_m = re.search(r"vsimg=([^&]+)", loc or "")
-    blob = urllib.parse.unquote(blob_m.group(1)) if blob_m else None
-    return bcid_m.group(0), blob
+    return bcid_m.group(0), loc
 
 
 _BING_BOUNCE_RE = re.compile(r"FORM=(?:SBIRDI|SBIHMP)")
 
 
-def bing_search_http(image_path, cookie_jar=None):
+def bing_search_http(image_path):
     """Bing 视觉搜索·纯 HTTP 快路径，返回 (item_ids有序, derived_query, final_url)。
 
-    协议（逆向自 kitUIN/PicImageSearch）：
+    实测协议（2026-09-27，SG 出口验证）：
     Step1 multipart 上传 base64 图片，从 302 Location 提取 bcid；
-    Step2 清 Cookie 后 POST knowledge API（insightsToken=bcid）拿 insights JSON；
-    Step3 JSON 无结果时改取 detailV2 详情页 HTML（部分网络下该页会弹回首页，
-          此时直接抛错，由调用方回落 playwright 引擎）。
+    Step2 手动跟随 detailV2 的重定向链（宽松地区会 302 到 /search?q=<派生词> 的
+          结果页）。派生词就是 Bing 读出的图内文字，与 playwright 流程等价；
+          结果页的视觉面板由前端渲染，纯 HTTP 通常拿不到 booth 直链（返回空列表），
+          由调用方用派生词走关键词搜索兜底。
+    受限网络（弹回 FORM=SBIRDI/SBIHMP 首页）时抛错，由调用方回落 playwright。
+    knowledge API 路线已验证不可行：无 X-Image-Knowledge-Signature 恒返回空壳，
+    而签名只存在于 JS 渲染页面，纯 HTTP 拿不到（本机与 SG 双重实测）。
     """
-    bcid, blob = _bing_upload(image_path)
+    bcid, loc = _bing_upload(image_path)
     result_url = f"https://www.bing.com/images/search?insightsToken={bcid}"
 
-    body2, ctype2 = _multipart([("knowledgeRequest", json.dumps(
-        {"imageInfo": {"imageInsightsToken": bcid, "source": "Gallery"}}))])
-    _, _, data, _ = _bing_post(
-        _BING_INSIGHTS_PATH,
-        query={
-            "rshighlight": "true", "textDecorations": "true",
-            "internalFeatures": "similarproducts,share", "nbl": "1",
-            "safeSearch": "off", "mkt": "en-us", "setLang": "en-us",
-            "iss": "SBIUPLOADGET", "IID": "idpins", "SFX": "1",
-            "insightsToken": bcid,
-        },
-        body=body2, content_type=ctype2,
-        extra_headers={"Referer": result_url})
-    ids = _ordered_ids(data)
-    if ids:
-        return ids, _derived_from_insights(data), result_url
+    url = urllib.parse.urljoin("https://www.bing.com", loc) if loc else result_url
+    html, final_url = "", url
+    for _hop in range(4):
+        status, final_url, html, nxt = _bing_get(url)
+        if status == 200 or not nxt:
+            break
+        url = urllib.parse.urljoin(url, nxt)
 
-    # knowledge 空结果 → 试 detailV2 详情页（宽松地区可直出含 booth 链接的 HTML）
-    status, _, html, loc = _bing_get(
-        f"/images/search?view=detailV2&insightsToken={bcid}"
-        + (f"&vsimg={urllib.parse.quote(blob, safe='')}" if blob else ""))
-    if status == 200 and not (loc and _BING_BOUNCE_RE.search(loc)):
-        ids = _ordered_ids(html)
-        if ids:
-            return ids, "", result_url
-    raise RuntimeError("Bing HTTP 快路径无结果（SBI 页面被弹回或区域受限），走 playwright 备援")
+    if status == 200 and not _BING_BOUNCE_RE.search(final_url or ""):
+        m = re.search(r"[?&]q=([^&]+)", final_url or "")
+        if m:
+            derived = urllib.parse.unquote_plus(m.group(1))
+            return _ordered_ids(html), derived, final_url
+    raise RuntimeError("Bing HTTP 快路径被弹回或无派生词（受限网络），走 playwright 备援")
 
 
 # ---------------------------------------------------------------- playwright 备援

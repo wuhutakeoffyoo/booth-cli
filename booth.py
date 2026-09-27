@@ -635,7 +635,8 @@ def cmd_imgsearch(args):
                 via[iid] = eng
                 ordered.append(iid)
         print(f"[{eng}] 候选 {len(ids)} 个: {ids[:8]}", file=sys.stderr)
-        if ordered and eng == "bing":
+        # bing 即使无视觉直链，派生词也足以驱动关键词搜索，不必再试第二引擎
+        if (ordered or derived) and eng == "bing":
             break
 
     if not ordered and derived:
@@ -645,6 +646,16 @@ def cmd_imgsearch(args):
         page_html, _ = get_html(
             BASE + "/ja/search/" + urllib.parse.quote(kw, safe="") + "?sort=popularity&adult=include")
         res = parse_search_page(page_html)
+        if not res["items"]:
+            # 全派生词搜不到（Bing 的 OCR 词常带括号注释），退回拉丁词元再试
+            latin = " ".join(re.findall(
+                r"[^\s\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]+", derived)).strip()
+            if latin and latin != kw:
+                print(f"提示: 派生词无结果，改用拉丁词元: {latin}", file=sys.stderr)
+                page_html, _ = get_html(
+                    BASE + "/ja/search/" + urllib.parse.quote(latin, safe="")
+                    + "?sort=popularity&adult=include")
+                res = parse_search_page(page_html)
         ordered = [it["id"] for it in res["items"][:args.limit]]
         via = {i: "bing-query" for i in ordered}
 
