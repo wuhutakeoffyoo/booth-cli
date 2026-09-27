@@ -6,6 +6,9 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
 ## 特性
 
 - **关键词搜索 / 商品详情 / 商店查询**：结构化 `--json` 输出，为 AI agent 调用设计。
+- **bot 接入钩子**：`booth bot` JSON 信封接口（子进程进出、退出码恒 0、永不抛栈），
+  NoneBot/Koishi/Yunzai 等框架均可直接接，见 [QQBOT.md](QQBOT.md)；
+  配套 NoneBot 实现：[booth-bot](https://github.com/wuhutakeoffyoo/booth-bot)。
 - **以图找品（imgsearch）**：Bing 视觉搜索**纯 HTTP 快路径优先**（协议逆向自开源库
   [kitUIN/PicImageSearch](https://github.com/kitUIN/PicImageSearch)，约 2 秒、无浏览器），
   被区域风控拒绝时自动回落 playwright 浏览器引擎（有头 + 持久 profile 过 Cloudflare），
@@ -16,7 +19,7 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   （借鉴 [tenacity](https://github.com/jd/tenacity)），对 Booth 限流更友好。
 - **安全边界**：仅允许 `https://*.booth.pm` 官方域名（重定向逐跳校验），Bing 端点主机白名单 +
   DNS 解析私网地址阻断（防 SSRF/DNS rebinding）。
-- **测试**：`python -m unittest discover -s tests`，20 个用例覆盖解析器/安全边界/缓存/退避，不联网。
+- **测试**：`python -m unittest discover -s tests`，覆盖解析器/安全边界/缓存/退避/bot 钩子，不联网。
 
 ## 为什么自己写
 

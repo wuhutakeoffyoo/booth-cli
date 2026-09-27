@@ -12,15 +12,18 @@ Retry-After 感知的指数退避重试。
   booth shop   <商店子域名|URL> [选项] 查看商店信息与最新商品
   booth imgsearch <图片路径|URL> [选项]  以图搜品（Bing 纯HTTP优先,失败回落浏览器; ascii2d 备援;
                                      浏览器备援需 playwright）
+  booth bot '<json>'                  bot 框架接入钩子：JSON 信封进出（见 QQBOT.md）
   booth help                          显示帮助
 
 AI 调用建议: 一律加 --json 获取结构化输出。
 """
 
 import argparse
+import contextlib
 import email.utils
 import gzip
 import html as html_mod
+import io
 import json
 import random
 import re
@@ -33,6 +36,8 @@ from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
+
+__version__ = "1.2.0"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -611,10 +616,12 @@ def cmd_imgsearch(args):
                     from reverse_search import bing_search
                     print(f"警告: bing-http 失败({str(e_http)[:80]})，改用浏览器引擎",
                           file=sys.stderr)
-                    ids, derived, _ = bing_search(path, headless=args.headless)
+                    ids, derived, _ = bing_search(path, wait_s=args.wait_s,
+                                                  headless=args.headless)
             elif eng == "ascii2d":
                 from reverse_search import ascii2d_search
-                ids, _ = ascii2d_search(path, headless=args.headless)
+                ids, _ = ascii2d_search(path, wait_s=args.wait_s,
+                                        headless=args.headless)
             else:
                 continue
         except ImportError:
@@ -696,6 +703,94 @@ def cmd_imgsearch(args):
         print(f"    {m.get('url')}")
 
 
+# ---------------------------------------------------------------- bot 钩子
+# 为 QQ bot 框架（NoneBot/Koishi/Yunzai/go-cqhttp 插件等）提供的稳定接入层：
+# 子进程调用 `booth bot '<json>'`（或 stdin 管道），返回统一 JSON 信封，
+# 永不抛栈、退出码恒为 0，ok 字段表达成败。详见 QQBOT.md。
+
+BOT_ACTIONS = ("search", "item", "shop", "imgsearch")
+_BOT_POSITIONAL = {"search": "query", "item": "id", "shop": "shop", "imgsearch": "image"}
+_BOT_LIST_FLAGS = ("tag", "or_word", "exclude")
+_BOT_BOOL_FLAGS = ("vrc", "in_stock", "full", "headless", "no_cache")
+
+
+def bot_params_to_argv(action, params):
+    """把信封里的 params（snake_case，与 CLI 旗标同名）转成子命令 argv。"""
+    argv = [action]
+    pos = params.get(_BOT_POSITIONAL[action])
+    if pos is not None and not isinstance(pos, (str, list)):
+        pos = str(pos)
+    if isinstance(pos, str):
+        argv.append(pos)
+    elif isinstance(pos, list):
+        argv.extend(str(x) for x in pos)
+    for key, value in params.items():
+        if key in (_BOT_POSITIONAL[action], "action", "json", "params"):
+            continue
+        flag = "--" + key.replace("_", "-")
+        if key in _BOT_BOOL_FLAGS:
+            if value:
+                argv.append(flag)
+        elif isinstance(value, list) or key in _BOT_LIST_FLAGS:
+            items = value if isinstance(value, list) else [value]
+            for one in items:
+                argv.extend([flag, str(one)])
+        elif value is not None:
+            argv.extend([flag, str(value)])
+    return argv
+
+
+def _bot_envelope(ok, action, data=None, error=None):
+    payload = {"ok": ok, "action": action}
+    if ok:
+        payload["data"] = data
+    else:
+        payload["error"] = error
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def cmd_bot(args):
+    action = "?"
+    raw = (args.payload or "").strip()
+    if not raw and not sys.stdin.isatty():
+        raw = sys.stdin.read().strip()
+    try:
+        req = json.loads(raw) if raw else {}
+        if not isinstance(req, dict):
+            raise BoothError("payload 必须是 JSON 对象，如 {\"action\":\"search\",\"params\":{...}}")
+        action = str(req.get("action", "")).strip()
+        if action == "version":
+            print(_bot_envelope(True, "version", {"version": __version__}))
+            return
+        if action not in BOT_ACTIONS:
+            raise BoothError(f"未知 action: {action!r}（支持 {list(BOT_ACTIONS)} 与 version）")
+        extra = req.get("params") if isinstance(req.get("params"), dict) else {}
+        flat = {k: v for k, v in req.items() if k not in ("action", "params")}
+        params = {**flat, **extra}
+
+        argv = bot_params_to_argv(action, params) + ["--json"]
+        err_buf, out_buf = io.StringIO(), io.StringIO()
+        exit_code = 0
+        try:
+            with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+                ns = build_parser().parse_args(argv)
+                ns.func(ns)
+        except SystemExit as e:  # argparse 用法错误
+            exit_code = e.code or 0
+        if exit_code:
+            msg = err_buf.getvalue().strip().splitlines()
+            raise BoothError(msg[-1] if msg else f"参数解析失败（exit {exit_code}）")
+
+        data = json.loads(out_buf.getvalue())
+        print(_bot_envelope(True, action, data))
+    except (BoothError, ValueError) as e:
+        print(_bot_envelope(False, action, error=str(e)[:300]))
+    except json.JSONDecodeError as e:
+        print(_bot_envelope(False, action, error=f"payload/输出 JSON 解析失败: {e}"))
+    except Exception as e:  # 信封接口永不抛栈
+        print(_bot_envelope(False, action, error=f"{type(e).__name__}: {str(e)[:300]}"))
+
+
 # ---------------------------------------------------------------- CLI
 
 def build_parser():
@@ -703,6 +798,7 @@ def build_parser():
                                 description="Booth.pm 搜索 CLI（为 AI agent 设计，输出建议加 --json）",
                                 formatter_class=argparse.RawDescriptionHelpFormatter,
                                 epilog="常用分类 slug(--category): " + "、".join(CATEGORY_HINTS))
+    p.add_argument("--version", action="version", version=f"booth {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def add_common(sp):
@@ -757,10 +853,16 @@ def build_parser():
                           "首个引擎有结果时可跳过第二个）")
     pi2.add_argument("--headless", action="store_true",
                      help="浏览器备援引擎用无头模式（默认有头以复用 ~/.booth-cli/pw_profile 的通过状态）")
+    pi2.add_argument("--wait-s", type=int, default=24,
+                     help="浏览器备援引擎等待结果的秒数（默认 24，bot 接入时可调小控时）")
     pi2.add_argument("--limit", type=int, default=5, help="最多返回候选数（默认 5）")
     pi2.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
     add_common(pi2)
     pi2.set_defaults(func=cmd_imgsearch)
+
+    pb = sub.add_parser("bot", help="bot 框架接入钩子：JSON 信封进出（见 QQBOT.md）")
+    pb.add_argument("payload", nargs="?", help="JSON 请求，如 '{\"action\":\"search\",\"params\":{\"query\":\"VRChat\"}}'；缺省读 stdin")
+    pb.set_defaults(func=cmd_bot)
 
     return p
 

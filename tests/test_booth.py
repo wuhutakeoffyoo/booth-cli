@@ -4,6 +4,7 @@
 运行: python -m unittest discover -s tests -v
 """
 
+import argparse
 import html as html_mod
 import json
 import sys
@@ -221,6 +222,55 @@ class TestRetryDelay(unittest.TestCase):
     def test_garbage_falls_back(self):
         d = booth._retry_delay(1, {"Retry-After": "soon"})
         self.assertTrue(1.5 <= d <= 15.0 + 1.0 + 0.1)
+
+
+class TestBotHook(unittest.TestCase):
+    def _run_bot(self, payload):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            booth.cmd_bot(argparse.Namespace(payload=payload))
+        return json.loads(buf.getvalue())
+
+    def test_params_to_argv_search(self):
+        argv = booth.bot_params_to_argv("search", {
+            "query": ["VRChat", "アバター"], "sort": "popularity",
+            "tag": ["VRChat", "衣装"], "vrc": True, "min_price": 100,
+            "no_cache": True, "limit": 5})
+        self.assertEqual(argv, ["search", "VRChat", "アバター", "--sort", "popularity",
+                                "--tag", "VRChat", "--tag", "衣装", "--vrc",
+                                "--min-price", "100", "--no-cache", "--limit", "5"])
+
+    def test_params_to_argv_scalar_positional(self):
+        argv = booth.bot_params_to_argv("item", {"id": 3368697, "full": True})
+        self.assertEqual(argv, ["item", "3368697", "--full"])
+
+    def test_params_to_argv_accepts_parse(self):
+        # 生成的 argv 必须能被正式 parser 接受（校验旗标拼写）
+        for action, params in (("search", {"query": "x", "limit": 3}),
+                               ("item", {"id": 1}),
+                               ("shop", {"shop": "mukumi", "pages": 2}),
+                               ("imgsearch", {"image": "a.jpg", "headless": True,
+                                              "wait_s": 10})):
+            ns = booth.build_parser().parse_args(
+                booth.bot_params_to_argv(action, params) + ["--json"])
+            self.assertTrue(hasattr(ns, "func"))
+
+    def test_envelope_ok_and_errors(self):
+        out = self._run_bot('{"action":"nope"}')
+        self.assertFalse(out["ok"])
+        self.assertIn("未知 action", out["error"])
+        out = self._run_bot("not-json")
+        self.assertFalse(out["ok"])
+        out = self._run_bot('{"action":"item"}')  # 缺必填位置参数
+        self.assertFalse(out["ok"])
+        self.assertIn("required", out["error"])
+
+    def test_envelope_version(self):
+        out = self._run_bot('{"action":"version"}')
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["data"]["version"], booth.__version__)
 
 
 if __name__ == "__main__":
