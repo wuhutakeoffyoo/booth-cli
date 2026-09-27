@@ -3,22 +3,29 @@
 
 零第三方依赖，只用 Python 标准库。数据来自 Booth 页面内嵌的结构化数据与
 非官方 JSON 接口（/ja/items/{id}.json），请在请求间保持 ≥1 秒间隔以减轻服务器负担。
+内置 sqlite 磁盘缓存（商品 6h / 搜索页 10min，--no-cache 跳过）与
+Retry-After 感知的指数退避重试。
 
 用法:
   booth search <关键词...> [选项]     搜索全站商品
   booth item   <商品ID|URL> [选项]    查看商品详情
   booth shop   <商店子域名|URL> [选项] 查看商店信息与最新商品
+  booth imgsearch <图片路径|URL> [选项]  以图搜品（Bing 纯HTTP优先,失败回落浏览器; ascii2d 备援;
+                                     浏览器备援需 playwright）
   booth help                          显示帮助
 
 AI 调用建议: 一律加 --json 获取结构化输出。
 """
 
 import argparse
+import email.utils
 import gzip
 import html as html_mod
 import json
+import random
 import re
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -33,6 +40,14 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 PAGE_DELAY = 1.2          # 多页抓取时的请求间隔（秒）
 DEFAULT_DESC_LEN = 600    # 商品详情描述默认截断长度
 MAX_REDIRECTS = 5
+MAX_ATTEMPTS = 4          # 限流/临时错误的退避重试次数（借鉴 tenacity 的指数退避+抖动）
+
+# 磁盘缓存（借鉴 requests-cache 的持久 HTTP 缓存思路，sqlite 实现，零依赖）
+CACHE_PATH = Path.home() / ".booth-cli" / "cache.sqlite3"
+CACHE_TTL_ITEM = 6 * 3600   # 商品 JSON 变化少，缓存 6 小时
+CACHE_TTL_PAGE = 600        # 搜索/商店页要求新鲜度，缓存 10 分钟
+_CACHE_CONN = None          # 惰性初始化；False 表示不可用
+_NO_CACHE = False
 
 SORTS = ("new", "popularity", "liked", "price_asc", "price_desc")
 TYPES = ("all", "digital", "physical")
@@ -69,12 +84,86 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
-def http_get(url, *, json_accept=False, csrf=None):
+def set_cache_enabled(enabled):
+    global _NO_CACHE
+    _NO_CACHE = not enabled
+
+
+def _cache():
+    """惰性打开 sqlite 缓存；不可用时返回 None（降级为无缓存）。"""
+    global _CACHE_CONN
+    if _CACHE_CONN is None:
+        try:
+            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(CACHE_PATH), timeout=2)
+            conn.execute("CREATE TABLE IF NOT EXISTS cache "
+                         "(key TEXT PRIMARY KEY, ts REAL, body BLOB, final_url TEXT)")
+            conn.execute("DELETE FROM cache WHERE ts < ?", (time.time() - 7 * 24 * 3600,))
+            conn.commit()
+            _CACHE_CONN = conn
+        except Exception:
+            _CACHE_CONN = False
+    return _CACHE_CONN if _CACHE_CONN else None
+
+
+def cache_get(url, ttl):
+    if _NO_CACHE or ttl <= 0:
+        return None
+    conn = _cache()
+    if not conn:
+        return None
+    try:
+        row = conn.execute("SELECT ts, body, final_url FROM cache WHERE key = ?",
+                           (url,)).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or time.time() - row[0] > ttl:
+        return None
+    return bytes(row[1]), row[2]
+
+
+def cache_put(url, body, final_url):
+    if _NO_CACHE:
+        return
+    conn = _cache()
+    if not conn:
+        return
+    try:
+        conn.execute("INSERT OR REPLACE INTO cache (key, ts, body, final_url) VALUES (?,?,?,?)",
+                     (url, time.time(), body, final_url))
+        conn.commit()
+    except sqlite3.Error:
+        pass
+
+
+def _retry_delay(attempt, headers=None):
+    """退避延迟：优先响应 Retry-After（tenacity 思路），否则指数退避 + 抖动。"""
+    if headers:
+        ra = headers.get("Retry-After")
+        if ra:
+            try:
+                return min(float(ra), 45.0)
+            except ValueError:
+                try:
+                    dt = email.utils.parsedate_to_datetime(ra)
+                    delay = dt.timestamp() - time.time()
+                    return min(max(delay, 0.0), 45.0)
+                except Exception:
+                    pass
+    return min(1.5 * (2 ** attempt), 15.0) + random.uniform(0.0, 1.0)
+
+
+def http_get(url, *, json_accept=False, csrf=None, cache_ttl=0):
     """GET 一个 booth.pm 的 URL，返回 (body_bytes, final_url, status)。
 
-    重定向手动跟随并逐跳校验主机白名单，带限次重试。
+    重定向手动跟随并逐跳校验主机白名单；限流/临时错误按 Retry-After 或指数
+    退避重试；cache_ttl>0 时启用磁盘缓存。
     """
     assert_allowed_url(url)
+    cached = cache_get(url, cache_ttl)
+    if cached is not None:
+        return cached[0], cached[1], 200
+
     headers = {
         "User-Agent": UA,
         "Accept": "application/json" if json_accept else "text/html,application/xhtml+xml,*/*;q=0.8",
@@ -89,7 +178,7 @@ def http_get(url, *, json_accept=False, csrf=None):
         headers["Sec-Fetch-Site"] = "same-origin"
 
     last_err = None
-    for attempt in range(3):
+    for attempt in range(MAX_ATTEMPTS):
         current = url
         for _hop in range(MAX_REDIRECTS):
             try:
@@ -98,6 +187,8 @@ def http_get(url, *, json_accept=False, csrf=None):
                     data = resp.read()
                     if resp.headers.get("Content-Encoding") == "gzip":
                         data = gzip.decompress(data)
+                    if cache_ttl > 0:
+                        cache_put(url, data, current)
                     return data, current, resp.status
             except urllib.error.HTTPError as e:
                 if e.code in (301, 302, 303, 307, 308):
@@ -117,19 +208,20 @@ def http_get(url, *, json_accept=False, csrf=None):
                     if e.code == 403 and b"Just a moment" in body:
                         raise BoothError(CLOUDFLARE_HINT)
                     last_err = BoothError(f"HTTP {e.code}（可能是限流或防护页）: {current}")
+                    time.sleep(_retry_delay(attempt, e.headers))
                     break  # 走外层重试
                 raise BoothError(f"HTTP {e.code}: {current}")
             except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
                 last_err = BoothError(f"网络错误: {e} ({current})")
+                time.sleep(_retry_delay(attempt))
                 break  # 走外层重试
         else:
             raise BoothError(f"重定向次数过多: {url}")
-        time.sleep(1.5 * (attempt + 1))
     raise last_err or BoothError(f"请求失败: {url}")
 
 
-def get_html(url):
-    data, final_url, _ = http_get(url)
+def get_html(url, cache_ttl=CACHE_TTL_PAGE):
+    data, final_url, _ = http_get(url, cache_ttl=cache_ttl)
     text = data.decode("utf-8", errors="replace")
     if "Just a moment" in text and "challenge" in text.lower():
         raise BoothError(CLOUDFLARE_HINT)
@@ -139,7 +231,7 @@ def get_html(url):
 
 
 def get_json(url, csrf=None):
-    data, _, _ = http_get(url, json_accept=True, csrf=csrf)
+    data, _, _ = http_get(url, json_accept=True, csrf=csrf, cache_ttl=CACHE_TTL_ITEM)
     return json.loads(data.decode("utf-8", errors="replace"))
 
 
@@ -504,21 +596,30 @@ def cmd_imgsearch(args):
         if not Path(path).is_file():
             raise BoothError(f"本地图片不存在: {path}（也支持 booth 官方图床的图片 URL）")
 
-    try:
-        from reverse_search import bing_search, ascii2d_search
-    except ImportError:
-        raise BoothError("需要 playwright: pip install playwright && playwright install chrome")
-
     engines = [e.strip() for e in args.engine.split(",") if e.strip()]
     ordered, via, derived = [], {}, ""
     for eng in engines:
         try:
             if eng == "bing":
-                ids, derived, _ = bing_search(path)
+                # 先走纯 HTTP 快路径（无浏览器、约 2 秒），失败回落 playwright
+                try:
+                    from reverse_search import bing_search_http
+                    ids, derived, _ = bing_search_http(path)
+                except ImportError:
+                    raise
+                except Exception as e_http:
+                    from reverse_search import bing_search
+                    print(f"警告: bing-http 失败({str(e_http)[:80]})，改用浏览器引擎",
+                          file=sys.stderr)
+                    ids, derived, _ = bing_search(path, headless=args.headless)
             elif eng == "ascii2d":
-                ids, _ = ascii2d_search(path)
+                from reverse_search import ascii2d_search
+                ids, _ = ascii2d_search(path, headless=args.headless)
             else:
                 continue
+        except ImportError:
+            raise BoothError("浏览器备援引擎需要 playwright: "
+                             "pip install playwright && playwright install chrome")
         except Exception as e:
             print(f"警告: {eng} 引擎失败: {str(e)[:120]}", file=sys.stderr)
             continue
@@ -590,7 +691,8 @@ def cmd_imgsearch(args):
     print(f"反向搜图命中 {len(matches)} 个候选" +
           (f"（引擎派生词: {derived}）" if derived else "") + "：\n")
     for m in matches:
-        print(f"#{m.get('id')}  {m.get('price') or ''}  {m.get('name') or '(详情获取失败)'}  [{m.get('via')}]")
+        price = f"¥{m['price']:,}" if isinstance(m.get("price"), int) else (m.get("price") or "")
+        print(f"#{m.get('id')}  {price}  {m.get('name') or '(详情获取失败)'}  [{m.get('via')}]")
         print(f"    {m.get('url')}")
 
 
@@ -602,6 +704,10 @@ def build_parser():
                                 formatter_class=argparse.RawDescriptionHelpFormatter,
                                 epilog="常用分类 slug(--category): " + "、".join(CATEGORY_HINTS))
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add_common(sp):
+        sp.add_argument("--no-cache", action="store_true",
+                        help="跳过磁盘缓存强制重新请求（默认缓存: 商品 6h / 搜索页 10min）")
 
     ps = sub.add_parser("search", help="搜索全站商品", aliases=["s"])
     ps.add_argument("query", nargs="*", help="关键词（可含空格/日文）")
@@ -625,6 +731,7 @@ def build_parser():
     ps.add_argument("--pages", type=int, default=1, help="连续抓取页数（页间隔约1.2秒）")
     ps.add_argument("--limit", type=int, default=30, help="最多返回条数（默认 30）")
     ps.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    add_common(ps)
     ps.set_defaults(func=cmd_search)
 
     pi = sub.add_parser("item", help="商品详情", aliases=["i"])
@@ -632,21 +739,27 @@ def build_parser():
     pi.add_argument("--desc-len", type=int, default=DEFAULT_DESC_LEN, help="简介截断长度")
     pi.add_argument("--full", action="store_true", help="输出原始完整 JSON")
     pi.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    add_common(pi)
     pi.set_defaults(func=cmd_item)
 
     ph = sub.add_parser("shop", help="商店信息与最新商品", aliases=["sh"])
     ph.add_argument("shop", nargs="+", help="商店子域名或 URL")
     ph.add_argument("--pages", type=int, default=1)
     ph.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    add_common(ph)
     ph.set_defaults(func=cmd_shop)
 
-    pi2 = sub.add_parser("imgsearch", help="以图搜品（Lens/ascii2d 反向搜图，需 playwright）",
+    pi2 = sub.add_parser("imgsearch", help="以图搜品（Bing 视觉搜索: HTTP 快路径+浏览器备援; ascii2d 备援）",
                          aliases=["is"])
     pi2.add_argument("image", nargs="+", help="本地图片路径 或 booth 官方图床的图片 URL")
-    pi2.add_argument("--engine", default="lens,ascii2d",
-                     help="引擎与顺序（默认 lens,ascii2d；首个引擎有结果时可跳过第二个）")
+    pi2.add_argument("--engine", default="bing,ascii2d",
+                     help="引擎与顺序（默认 bing,ascii2d；bing=纯HTTP优先,失败自动回落浏览器; "
+                          "首个引擎有结果时可跳过第二个）")
+    pi2.add_argument("--headless", action="store_true",
+                     help="浏览器备援引擎用无头模式（默认有头以复用 ~/.booth-cli/pw_profile 的通过状态）")
     pi2.add_argument("--limit", type=int, default=5, help="最多返回候选数（默认 5）")
     pi2.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    add_common(pi2)
     pi2.set_defaults(func=cmd_imgsearch)
 
     return p
@@ -665,6 +778,8 @@ def main(argv=None):
         return 0
 
     args = build_parser().parse_args(argv)
+    if getattr(args, "no_cache", False):
+        set_cache_enabled(False)
     try:
         args.func(args)
         return 0

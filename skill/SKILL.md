@@ -5,7 +5,7 @@ description: 用 booth CLI 搜索/查询 Booth.pm（VRChat 素材、同人市场
 
 # Booth.pm 搜索（booth CLI）
 
-已安装 `booth` 命令（~/bin/booth → C:\Users\NyakoWW\Desktop\booth-cli\booth.py，零依赖 Python，git 仓库在桌面 booth-cli/）。
+已安装 `booth` 命令（~/bin/booth → D:\boothcli\booth.py，零依赖 Python，git 仓库在 D:\boothcli）。
 **作为 AI 调用时一律加 `--json`** 获取结构化输出。输出编码已处理，可直接在 Windows Git Bash 运行。
 
 ## 常用调用
@@ -27,6 +27,9 @@ booth item 5813187 --json        # 也可传完整 URL
 # 商店信息 + 服务端渲染的最新商品
 booth shop mukumi --json
 ```
+
+**缓存**：内置 sqlite 磁盘缓存（`~/.booth-cli/cache.sqlite3`；商品 6 小时、搜索/商店页 10 分钟），
+重复查询瞬时返回。需要强制最新（刚上架、价格变动核对）时加 `--no-cache`。
 
 ## 多商品对比流程（"帮我对比 / 帮我选 / 哪个好"类需求）
 
@@ -56,11 +59,16 @@ booth shop mukumi --json
 
 ## 以图找品（拿到商品图反查 Booth 商品）
 
-**首选 `booth imgsearch`**（Bing 视觉搜索 + 派生词关键词自动合并；需 playwright 与本机 Chrome，运行时会弹出浏览器窗口，属正常现象）：
+**首选 `booth imgsearch`**（Bing 视觉搜索 + 派生词关键词自动合并）。
+引擎架构：**纯 HTTP 快路径优先**（无浏览器、约 2 秒；协议借鉴 kitUIN/PicImageSearch），
+被 Bing 区域风控拒绝时**自动回落 playwright 浏览器引擎**（弹浏览器窗口属正常现象，
+依赖本机 Chrome 与 `~/.booth-cli/pw_profile` 持久 profile，**勿删除该 profile**）；
+`--engine ascii2d` 可追加 ascii2d 备援；`--headless` 让浏览器备援无头运行（默认有头）。
 
 ```bash
 booth imgsearch 图片.jpg --json                                    # 本地图片
 booth imgsearch "https://booth.pximg.net/..." --json               # booth 官方图床 URL 也可以
+booth imgsearch 图片.jpg --engine ascii2d --json                   # 指定备援引擎
 ```
 
 返回 `derived_query`（Bing 从图里读出的文字，常就是商品名）与 matches（视觉候选前 2 + 派生词关键词命中）。
