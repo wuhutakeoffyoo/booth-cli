@@ -87,7 +87,7 @@ async def main():
                     continue
                 else:
                     out = (await bs._handle_image(
-                        f"http://127.0.0.1:8799/{s['image_file']}", ""))["text"]
+                        f"file://{B100 / 'images' / s['image_file']}", ""))["text"]
                 r, n = rank_of(out, tid)
                 entry["rank"], entry["total"] = r, n
                 if MODE != "jp":
