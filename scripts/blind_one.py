@@ -1,8 +1,7 @@
-"""单链路盲测 harness：python blind_one.py <jp|zh|img>
-
-JP: 日文直搜；ZH: 中文AI翻译；IMG: 识图（起本地图片HTTP服务）。
-结果逐样本写入 ~/blind/results_<mode>.json，日志 ~/blind/run_<mode>.log。
-"""
+"""单链路盲测 harness（支持 100 样本切片）：
+python blind_one.py <jp|zh|img> [--start N] [--end M] [--delay S]
+样本取 ~/blind100/truth.json（缺省回退 ~/blind/truth.json 10 样本版）。
+结果写 ~/blind100/results_{mode}_{start}-{end}.json。IMG 零候选自动退避（风控保护）。"""
 import asyncio
 import json
 import re
@@ -17,14 +16,27 @@ assert MODE in ("jp", "zh", "img"), MODE
 sys.path.insert(0, str(Path.home() / "booth-bot" / "src" / "plugins"))
 sys.path.insert(0, str(Path.home() / "booth-bot"))
 
+import argparse
+
+ap = argparse.ArgumentParser()
+ap.add_argument("mode", choices=["jp", "zh", "img"])
+ap.add_argument("--start", type=int, default=0)
+ap.add_argument("--end", type=int, default=10)
+ap.add_argument("--delay", type=float, default=None)
+ARGS = ap.parse_args()
+MODE = ARGS.mode
+DELAY = ARGS.delay if ARGS.delay is not None else (5.0 if MODE == "img" else 2.5)
+
 import nonebot  # noqa: E402
 
 nonebot.init()
 import booth_search as bs  # noqa: E402
 
+B100 = Path.home() / "blind100"
 BLIND = Path.home() / "blind"
-samples = json.loads((BLIND / "truth.json").read_text(encoding="utf-8"))
-RESULTS = BLIND / f"results_{MODE}.json"
+truth_path = (B100 / "truth.json") if (B100 / "truth.json").exists() else (BLIND / "truth.json")
+samples = json.loads(truth_path.read_text(encoding="utf-8"))[ARGS.start:ARGS.end]
+RESULTS = (B100 if B100.exists() else BLIND) / f"results_{MODE}_{ARGS.start}-{ARGS.end}.json"
 
 ID_RE = re.compile(r"items/(\d+)")
 
@@ -38,18 +50,22 @@ def rank_of(text, target):
     return (ids.index(target) + 1) if target in ids else 0, len(ids)
 
 
+_zero_streak = 0
+
+
 async def main():
     server = None
     if MODE == "img":
         server = subprocess.Popen(
             [sys.executable, "-m", "http.server", "8799",
-             "--directory", str(BLIND / "images")],
+             "--directory", str(B100 / "images")],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1.5)
 
+    global _zero_streak
     results = {}
     try:
-        for s in samples:
+        for idx, s in enumerate(samples):
             tid = s["id"]
             entry = {"name": s["name"][:44]}
             try:
@@ -57,6 +73,11 @@ async def main():
                     out = (await bs._handle_text(s["jp_query"]))["text"]
                 elif MODE == "zh":
                     out = (await bs._handle_text(s["zh_query"]))["text"]
+                elif not s.get("image_file"):
+                    entry["rank"], entry["err"] = -2, "no image"
+                    results[str(tid)] = entry
+                    print(f"[{MODE}] {tid} skip(no image)", flush=True)
+                    continue
                 else:
                     out = (await bs._handle_image(
                         f"http://127.0.0.1:8799/{s['image_file']}", ""))["text"]
@@ -74,8 +95,17 @@ async def main():
             results[str(tid)] = entry
             RESULTS.write_text(json.dumps(results, ensure_ascii=False, indent=1),
                                encoding="utf-8")
-            print(f"[{MODE}] {tid} rank={entry['rank']} err={entry.get('err', '')[:60]}",
-                  flush=True)
+            print(f"[{MODE}] {idx+ARGS.start} {tid} rank={entry['rank']} "
+                  f"err={entry.get('err', '')[:50]}", flush=True)
+            if MODE == "img" and entry.get("total", 1) == 0 and entry.get("rank", -1) != -1:
+                _zero_streak += 1
+                if _zero_streak >= 2:
+                    back = min(30 * _zero_streak, 90)
+                    print(f"[backoff] {_zero_streak} 连续零候选，退避 {back}s", flush=True)
+                    await asyncio.sleep(back)
+            else:
+                _zero_streak = 0
+            await asyncio.sleep(DELAY)
     finally:
         if server:
             server.terminate()
