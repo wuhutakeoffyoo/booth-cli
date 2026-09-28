@@ -45,7 +45,7 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 ### NoneBot2（Python）
 
 最简方式是直接 subprocess（推荐 `booth_client.py` 式封装，参考配套项目
-[booth-bot](https://github.com/wuhutakeoffyoo/booth-bot)——基于 NoneBot 的完整实现）：
+[vrc-booth-bot](https://github.com/wuhutakeoffyoo/vrc-booth-bot)（VRC 对口）——基于 NoneBot 的完整实现）：
 
 ```python
 import json, subprocess, sys
