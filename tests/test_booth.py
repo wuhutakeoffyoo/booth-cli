@@ -273,5 +273,16 @@ class TestBotHook(unittest.TestCase):
         self.assertEqual(out["data"]["version"], booth.__version__)
 
 
+class TestPoliteWait(unittest.TestCase):
+    def test_global_interval(self):
+        import time as _time
+        booth._LAST_REQ_TS = 0.0
+        t0 = _time.monotonic()
+        booth._polite_wait()
+        booth._polite_wait()
+        # 第二次调用应等待到间隔满足（至少 sleep 过）
+        self.assertLessEqual(booth.MIN_REQUEST_INTERVAL - (_time.monotonic() - t0), 0.6)
+
+
 if __name__ == "__main__":
     unittest.main()

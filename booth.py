@@ -16,6 +16,7 @@ Retry-After 感知的指数退避重试。
   booth help                          显示帮助
 
 AI 调用建议: 一律加 --json 获取结构化输出。
+内置对 booth.pm 的全局限速（每请求 ≥1 秒间隔）。
 """
 
 import argparse
@@ -31,6 +32,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 import urllib.error
@@ -65,6 +67,21 @@ CLOUDFLARE_HINT = ("店铺开启了 Cloudflare 人机验证（返回 'Just a mom
 
 # 安全边界: 本工具只访问 Booth 官方域名，协议仅限 https，重定向逐跳校验
 ALLOWED_HOST_SUFFIX = ".booth.pm"
+
+# 出站限速：对 booth.pm 的所有请求全局保持最小间隔（对站点的礼貌，也是防风控）
+MIN_REQUEST_INTERVAL = 1.0
+_REQ_LOCK = threading.Lock()
+_LAST_REQ_TS = 0.0
+
+
+def _polite_wait():
+    """保证距上一次出站请求至少 MIN_REQUEST_INTERVAL 秒（线程安全）。"""
+    global _LAST_REQ_TS
+    with _REQ_LOCK:
+        wait = MIN_REQUEST_INTERVAL - (time.time() - _LAST_REQ_TS)
+        if wait > 0:
+            time.sleep(wait)
+        _LAST_REQ_TS = time.time()
 
 
 class BoothError(Exception):
@@ -168,6 +185,7 @@ def http_get(url, *, json_accept=False, csrf=None, cache_ttl=0):
     cached = cache_get(url, cache_ttl)
     if cached is not None:
         return cached[0], cached[1], 200
+    _polite_wait()
 
     headers = {
         "User-Agent": UA,
@@ -247,6 +265,7 @@ def download_image(url):
     if parts.scheme != "https" or not (
             host == "booth.pm" or host.endswith(".booth.pm") or host == "booth.pximg.net"):
         raise BoothError(f"图片 URL 超出许可范围（仅允许 booth 官方图床）: {url}")
+    _polite_wait()
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": "https://booth.pm/"})
     data = _OPENER.open(req, timeout=30).read()
     if data[:2] != b"\xff\xd8":
