@@ -24,6 +24,7 @@ ap.add_argument("--start", type=int, default=0)
 ap.add_argument("--end", type=int, default=10)
 ap.add_argument("--delay", type=float, default=None)
 ap.add_argument("--dir", default="blind100")
+ap.add_argument("--port", type=int, default=8799)
 ARGS = ap.parse_args()
 MODE = ARGS.mode
 DELAY = ARGS.delay if ARGS.delay is not None else (5.0 if MODE == "img" else 2.5)
@@ -58,7 +59,7 @@ async def main():
     server = None
     if MODE == "img":
         server = subprocess.Popen(
-            [sys.executable, "-m", "http.server", "8799",
+            [sys.executable, "-m", "http.server", str(ARGS.port),
              "--directory", str(B100 / "images")],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1.5)
@@ -70,6 +71,11 @@ async def main():
             tid = s["id"]
             entry = {"name": s["name"][:44]}
             try:
+                if MODE in ("jp", "zh") and not s.get(f"{MODE}_query"):
+                    entry["rank"], entry["err"] = -2, "no query"
+                    results[str(tid)] = entry
+                    print(f"[{MODE}] {tid} skip(no query)", flush=True)
+                    continue
                 if MODE == "jp":
                     out = (await bs._handle_text(s["jp_query"]))["text"]
                 elif MODE == "zh":
@@ -100,6 +106,9 @@ async def main():
                   f"err={entry.get('err', '')[:50]}", flush=True)
             if MODE == "img" and entry.get("total", 1) == 0 and entry.get("rank", -1) != -1:
                 _zero_streak += 1
+                if _zero_streak >= 6:
+                    print("[fuse] 连续零候选过多，熔断停止本进程", flush=True)
+                    break
                 if _zero_streak >= 2:
                     back = min(30 * _zero_streak, 90)
                     print(f"[backoff] {_zero_streak} 连续零候选，退避 {back}s", flush=True)
