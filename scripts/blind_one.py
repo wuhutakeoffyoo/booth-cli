@@ -54,12 +54,12 @@ async def main():
             entry = {"name": s["name"][:44]}
             try:
                 if MODE == "jp":
-                    out = await bs._handle_text(s["jp_query"])
+                    out = (await bs._handle_text(s["jp_query"]))["text"]
                 elif MODE == "zh":
-                    out = await bs._handle_text(s["zh_query"])
+                    out = (await bs._handle_text(s["zh_query"]))["text"]
                 else:
-                    out = await bs._handle_image(
-                        f"http://127.0.0.1:8799/{s['image_file']}", "")
+                    out = (await bs._handle_image(
+                        f"http://127.0.0.1:8799/{s['image_file']}", ""))["text"]
                 r, n = rank_of(out, tid)
                 entry["rank"], entry["total"] = r, n
                 if MODE != "jp":
