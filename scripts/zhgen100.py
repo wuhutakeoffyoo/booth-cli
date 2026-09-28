@@ -18,7 +18,8 @@ from booth_search.config import Config  # noqa: E402
 from nonebot import get_plugin_config  # noqa: E402
 
 cfg = get_plugin_config(Config)
-TRUTH = Path.home() / "blind100" / "truth.json"
+BLIND_DIR = Path.home() / (sys.argv[1] if len(sys.argv) > 1 else "blind100")
+TRUTH = BLIND_DIR / "truth.json"
 
 PROMPT = ("你是中国 VRChat 玩家，在 Booth.pm 看到了这个商品页面，想之后能搜到它。"
           "请给出你会输入的中文搜索词：2-8 个字的自然中文短语（可包含你知道的商品名原文、"

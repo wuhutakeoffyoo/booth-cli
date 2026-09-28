@@ -23,6 +23,7 @@ ap.add_argument("mode", choices=["jp", "zh", "img"])
 ap.add_argument("--start", type=int, default=0)
 ap.add_argument("--end", type=int, default=10)
 ap.add_argument("--delay", type=float, default=None)
+ap.add_argument("--dir", default="blind100")
 ARGS = ap.parse_args()
 MODE = ARGS.mode
 DELAY = ARGS.delay if ARGS.delay is not None else (5.0 if MODE == "img" else 2.5)
@@ -32,7 +33,7 @@ import nonebot  # noqa: E402
 nonebot.init()
 import booth_search as bs  # noqa: E402
 
-B100 = Path.home() / "blind100"
+B100 = Path.home() / ARGS.dir
 BLIND = Path.home() / "blind"
 truth_path = (B100 / "truth.json") if (B100 / "truth.json").exists() else (BLIND / "truth.json")
 samples = json.loads(truth_path.read_text(encoding="utf-8"))[ARGS.start:ARGS.end]
