@@ -3,6 +3,8 @@
 Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI agent 设计。
 零第三方依赖（Python 标准库实现），已安装为 `booth` 命令（`~/bin/booth` → 本目录 `booth.py`）。
 
+运作原理、分层兜底思路、参考的开源项目与盲测方法论，见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
 ## 特性
 
 - **关键词搜索 / 商品详情 / 商店查询**：结构化 `--json` 输出，为 AI agent 调用设计。
