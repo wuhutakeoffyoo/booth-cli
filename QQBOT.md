@@ -16,15 +16,20 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 
 | 字段 | 说明 |
 |---|---|
-| `action` | `search` / `item` / `shop` / `imgsearch` / `version` |
+| `action` | `search` / `item` / `shop` / `imgsearch` / `smart` / `version` |
 | `params` | 与 CLI 旗标同名的 snake_case 参数（`--or-word` → `"or_word"`，`--no-cache` → `"no_cache": true`） |
 | 平铺写法 | 也接受 `{"action":"search","query":"...","limit":5}` 直接把参数平铺在顶层 |
 
 各 action 的 params：
 
 - `search`：`query`（字符串或数组）、`sort`、`type`、`adult`（include/exclude/only）、
-  `tag[]`、`or_word[]`、`exclude[]`、`min_price`、`max_price`、`in_stock`、`vrc`、
-  `category`、`event`、`lang`、`page`、`pages`、`limit`、`no_cache`
+  `tag[]`、`or_word[]`、`exclude[]`、`min_price`、`max_price`、`in_stock`、`vrc`、`no_vrc`、
+  `category`、`event`、`lang`、`page`、`pages`、`limit`、`no_cache`。
+  **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`"no_vrc": true` 搜全站）
+- `smart`：`query`（需求式描述，中文/日文均可）、`sort`、`adult`、`no_vrc`、`page`、
+  `limit`、`no_ai`、`no_webfind`、`no_cache`。AI 需求解析读 CLI 进程环境变量
+  （`VISION_API_KEY` 等，与 vrc-booth-bot 同名），缺省降级直搜；**耗时约 30-90 秒**
+  （AI + 多路搜索 + 详情核实），建议超时给 120s+
 - `item`：`id`（数字/字符串/URL）、`desc_len`、`full`、`no_cache`
 - `shop`：`shop`（子域名或 URL）、`pages`、`no_cache`
 - `imgsearch`：`image`（本地路径；URL 会先下载）、`engine`（默认 bing,ascii2d）、

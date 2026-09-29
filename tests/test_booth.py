@@ -252,7 +252,8 @@ class TestBotHook(unittest.TestCase):
                                ("item", {"id": 1}),
                                ("shop", {"shop": "mukumi", "pages": 2}),
                                ("imgsearch", {"image": "a.jpg", "headless": True,
-                                              "wait_s": 10})):
+                                              "wait_s": 10}),
+                               ("smart", {"query": "尾巴", "limit": 3})):
             ns = booth.build_parser().parse_args(
                 booth.bot_params_to_argv(action, params) + ["--json"])
             self.assertTrue(hasattr(ns, "func"))

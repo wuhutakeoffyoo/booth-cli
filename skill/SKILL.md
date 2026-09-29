@@ -11,8 +11,16 @@ description: 用 booth CLI 搜索/查询 Booth.pm（VRChat 素材、同人市场
 ## 常用调用
 
 ```bash
-# 搜索（默认按新着、排除 R-18）。返回 total/count/items[{id,name,price,url,shop,category,tags,is_adult,image}]
-booth search "VRChat アバター" --vrc --limit 10 --json
+# 智能搜索（推荐入口）：中文/需求式描述直接给 AI 理解——产出日语关键词、
+# 分词合并搜索、「适用于XX素体」类需求自动按商品说明文核实
+booth smart "适用于Rexouium素体的服装" --json
+booth smart "尾巴" --json            # 部位/用途类自动转行业词（尻尾/しっぽ/テイル）
+# AI 读环境变量 VISION_API_KEY/VISION_BASE_URL/VISION_MODEL（与 vrc-booth-bot 同名），
+# 缺 key 或 --no-ai 时降级为分词+读音变体直搜（此时中文查询效果有限）；耗时约 30-90 秒
+
+# 关键词搜索（默认收窄 VRChat 圈 + 按新着序 + 联合搜索 R-18 带 is_adult 标记）。
+# 返回 total/count/items[{id,name,price,url,shop,category,tags,is_adult,image}]
+booth search "VRChat アバター" --limit 10 --json    # 搜全站加 --no-vrc
 
 # 人气排序 + 价格区间 + 分类 + 仅在售
 booth search "衣装" --sort popularity --min-price 1000 --max-price 5000 \
@@ -109,7 +117,8 @@ booth imgsearch 图片.jpg --engine ascii2d --json                   # 指定备
 
 ## 注意
 
-- `--sort`: new / popularity / liked / price_asc / price_desc；`--type`: all / digital / physical；`--adult`: **include(默认，联合搜索)** / exclude(仅全年齢) / only(仅R-18)。
+- `booth smart` 是 VRC 对口策略的集大成入口（AI 需求理解/单词级分词合并/假名读音变体/说明文核实素体兼容/回忆与网络检索兜底）；已知确切日文关键词时用 `search` 更快。smart 翻页时自动按新着排序（Booth popularity 排序忽略 page 参数，search 同样会自动切并标注 sort_note）。
+- `--sort`: new / popularity / liked / price_asc / price_desc；`--type`: all / digital / physical；`--adult`: **include(默认，联合搜索)** / exclude(仅全年齢) / only(仅R-18)；search/smart **默认收窄 VRChat 圈**（自动 `--tag VRChat`），`--no-vrc` 搜全站。
 - **R-18 说明**：Booth 的 R-18 是一元标记（情色与怪诞/R18G 类同旗，平台无独立 R18G 过滤），默认联合搜索，结果每件带 `is_adult`；展示给用户时对 adult 商品标注 R-18；要收窄怪诞向只能靠自由标签（如 `--tag グロ`，覆盖不全）。
 - `--category` 的 slug 必须是日语原文：`3Dキャラクター`、`3D衣装`、`3D小道具`、`3D装飾品`、`3Dテクスチャ`、`3D髪型`、`3D靴`、`VRoid` 等。
 - 多页用 `--pages N`（每次间隔约 1.2s，自动限速），配合 `--limit` 控制总量。

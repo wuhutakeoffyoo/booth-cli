@@ -7,7 +7,15 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
 
 ## 特性
 
+- **智能搜索（VRC 对口，`booth smart`）**：中文/需求式描述直接入口——AI 产出单词级
+  日语关键词 + 说明文核实词，分词多路合并搜索，「适用于XX素体的服装」类需求按
+  商品**说明文**（対応素体/仕様 段落）匹配置顶；知名商品回忆与网络检索（DDG/Exa）
+  兜底。策略与 [vrc-booth-bot](https://github.com/wuhutakeoffyoo/vrc-booth-bot) 同源。
+  AI 读环境变量 `VISION_API_KEY/VISION_BASE_URL/VISION_MODEL`（与 bot 同名，一份 .env
+  两边通用），缺省自动降级为分词+读音变体直搜。
 - **关键词搜索 / 商品详情 / 商店查询**：结构化 `--json` 输出，为 AI agent 调用设计。
+  search/smart **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`--no-vrc` 搜全站）；
+  popularity 排序翻页时自动切新着并标注（Booth 站点忽略 popularity 下的 page 参数）。
 - **bot 接入钩子**：`booth bot` JSON 信封接口（子进程进出、退出码恒 0、永不抛栈），
   NoneBot/Koishi/Yunzai 等框架均可直接接，见 [QQBOT.md](QQBOT.md)；
   配套 NoneBot 实现：[vrc-booth-bot](https://github.com/wuhutakeoffyoo/vrc-booth-bot)（VRC 对口）。
@@ -44,8 +52,13 @@ Booth 无官方公开 API；调研过的开源项目（boothmate / BoothPM-SDK /
 ```bash
 booth help                          # 帮助
 
-# 搜索（默认新着序、排除 R-18）
-booth search "VRChat アバター" --vrc --limit 10 --json
+# 智能搜索（VRC 对口推荐入口：中文/需求式描述 → AI 关键词 + 说明文核实 + 分词合并）
+booth smart "适用于Rexouium素体的服装" --json
+booth smart "尾巴" --no-ai --json    # 跳过 AI（分词+读音变体直搜）
+
+# 搜索（默认收窄 VRChat 圈、新着序、联合 R-18）
+booth search "VRChat アバター" --limit 10 --json
+booth search "衣装" --no-vrc --json  # 搜全站
 
 # 组合过滤
 booth search "衣装" --sort popularity --min-price 1000 --max-price 5000 \
@@ -74,7 +87,7 @@ booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 | `--sort` | `new`(新着) `popularity`(人气) `liked`(收藏) `price_asc` `price_desc` |
 | `--type` | `all` / `digital`(下载品) / `physical`(实体) |
 | `--adult` | `include`(默认，联合搜索) / `exclude`(仅全年齢) / `only`(仅R-18) |
-| `--tag NAME` | 标签过滤，可多次；`--vrc` 等价 `--tag VRChat` |
+| `--tag NAME` | 标签过滤，可多次；默认已自动收窄 VRChat（`--no-vrc` 搜全站） |
 | `--or-word W` / `--exclude W` | OR 词 / 排除词，可多次 |
 | `--min-price` / `--max-price` | 价格区间（日元） |
 | `--in-stock` | 仅在售 |

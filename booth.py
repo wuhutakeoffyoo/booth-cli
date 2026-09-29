@@ -7,6 +7,8 @@
 Retry-After 感知的指数退避重试。
 
 用法:
+  booth smart  <需求描述...> [选项]    VRC 对口智能搜索：中文/需求式描述 → AI 关键词
+                                      + 说明文核实 + 分词合并（见 smart_search.py）
   booth search <关键词...> [选项]     搜索全站商品
   booth item   <商品ID|URL> [选项]    查看商品详情
   booth shop   <商店子域名|URL> [选项] 查看商店信息与最新商品
@@ -17,6 +19,8 @@ Retry-After 感知的指数退避重试。
 
 AI 调用建议: 一律加 --json 获取结构化输出。
 内置对 booth.pm 的全局限速（每请求 ≥1 秒间隔）。
+search/smart 默认收窄 VRChat 圈（--tag VRChat），--no-vrc 关闭。
+smart 的 AI 需求解析读环境变量（与 vrc-booth-bot 同名）：VISION_API_KEY 等，缺省自动降级直搜。
 """
 
 import argparse
@@ -39,7 +43,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -477,10 +481,14 @@ def build_search_url(args):
         params["min_price"] = str(args.min_price)
     if args.max_price is not None:
         params["max_price"] = str(args.max_price)
-    if args.vrc:
-        args.tag = list(args.tag or []) + ["VRChat"]
-    for t in args.tag or []:
-        params.setdefault("tags[]", []).append(t)
+    tags = list(args.tag or [])
+    if getattr(args, "vrc", False):
+        tags.append("VRChat")  # VRC 对口默认收窄（--no-vrc 关闭）
+    seen_tags = set()
+    for t in tags:  # 去重保序（bot 显式传 tag 时避免 VRChat 重复）
+        if t and t not in seen_tags:
+            seen_tags.add(t)
+            params.setdefault("tags[]", []).append(t)
     for w in args.or_word or []:
         params.setdefault("or_words[]", []).append(w)
     for w in args.exclude or []:
@@ -491,7 +499,17 @@ def build_search_url(args):
     return BASE + path + (f"?{qs}" if qs else "")
 
 
+def effective_sort(sort: str, page: int) -> tuple:
+    """返回 (实际排序, 标注)。Booth 在 popularity 排序下忽略 page 参数（站点行为），
+    翻页时自动改按新着排序以保证翻页有效。"""
+    if page > 1 and sort == "popularity":
+        return "new", "（翻页按新着排序）"
+    return sort, ""
+
+
 def cmd_search(args):
+    sort, sort_note = effective_sort(args.sort, args.page)
+    args.sort = sort
     items, total, has_next = [], None, False
     fetched = 0
     for offset in range(args.pages):
@@ -518,11 +536,12 @@ def cmd_search(args):
         print(json.dumps({
             "query": " ".join(args.query or []).strip(), "page": args.page, "pages_fetched": fetched,
             "total": total, "count": len(items), "has_next": has_next,
+            "sort_note": sort_note or None,
             "items": items,
         }, ensure_ascii=False, indent=2))
     else:
         if total is not None:
-            print(f"共 {total:,} 件，本次显示 {len(items)} 件\n")
+            print(f"共 {total:,} 件，本次显示 {len(items)} 件{sort_note}\n")
         for it in items:
             price = f"¥{it['price']:,}" if it["price"] is not None else "价格未知"
             flags = "R-18" if it.get("is_adult") else ""
@@ -602,6 +621,209 @@ def cmd_shop(args):
         flags = "R-18" if it.get("is_adult") else ""
         vrc = "[VRChat]" if it.get("is_vrchat") else ""
         print(f"#{it['id']}  {price}  {flags} {vrc} {it['name']}")
+        print(f"    {it['url']}")
+
+
+# ---------------------------------------------------------------- 智能搜索（VRC 对口）
+# 策略与 vrc-booth-bot 同源：需求式描述 → AI 关键词（+说明文核实词）→ 单词级
+# 分词合并搜索 → 空结果回忆/网络检索兜底 → 拉详情按说明文匹配置顶。
+# 策略细节见 smart_search.py；AI 环境变量与 bot 同名，缺省自动降级直搜。
+
+_SMART_DETAIL_POOL = 15      # 描述核实时拉详情的候选池
+_SMART_DETAIL_DESC_LEN = 2000
+_SMART_WORKERS = 3           # 并发工作线程（出站仍受全局限速约束）
+
+
+def _search_once(term, base_args):
+    """按单词级检索词发一次站内搜索，返回 parse_search_page 结果。"""
+    ns = argparse.Namespace(**vars(base_args))
+    ns.query = [term]
+    ns.category = None
+    ns.event = None
+    # smart 解析器没有的 search 字段补默认值（build_search_url 需要全量字段）
+    ns.lang = getattr(ns, "lang", "ja")
+    ns.type = getattr(ns, "type", "all")
+    ns.tag = getattr(ns, "tag", None)
+    ns.or_word = getattr(ns, "or_word", None)
+    ns.exclude = getattr(ns, "exclude", None)
+    ns.in_stock = getattr(ns, "in_stock", False)
+    ns.min_price = getattr(ns, "min_price", None)
+    ns.max_price = getattr(ns, "max_price", None)
+    url = build_search_url(ns)
+    page_html, final_url = get_html(url)
+    return parse_search_page(page_html)
+
+
+def _merged_search(terms, base_args, via="关键词"):
+    """单词级多路并发搜索合并：去重 + 标题含词置顶（bot 侧 _search_merged 同款）。
+    返回 (merged_items, first_result, last_error)。单个词失败跳过。"""
+    from concurrent.futures import ThreadPoolExecutor
+    merged, seen, first_res, last_err = [], set(), None, None
+
+    def _one(term):
+        try:
+            return _search_once(term, base_args)
+        except BoothError as e:
+            return e
+
+    with ThreadPoolExecutor(max_workers=_SMART_WORKERS) as pool:
+        for res in pool.map(_one, terms[:6]):
+            if isinstance(res, BoothError):
+                last_err = res
+                continue
+            if first_res is None:
+                first_res = res
+            for it in res["items"]:
+                if it["id"] not in seen:
+                    it["via"] = via
+                    seen.add(it["id"])
+                    merged.append(it)
+    low = [t.lower() for t in terms if t]
+    if low:
+        merged.sort(key=lambda it: not any(
+            k in (it.get("name") or "").lower() for k in low))
+    return merged, first_res, last_err
+
+
+def _enrich_details(entries, desc_len=DEFAULT_DESC_LEN):
+    """并发拉商品详情：补收藏数/真实 tags/上架日期，简介存 _desc（描述核实用）。
+    并发受限（出站仍受全局 1s 限速），单条失败静默跳过。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _one(it):
+        try:
+            detail = trim_item(fetch_item(str(it["id"]), "ja"), desc_len=desc_len)
+        except BoothError:
+            return
+        for k in ("wish_lists_count", "tags", "published_at"):
+            if detail.get(k):
+                it[k] = detail[k]
+        it["_desc"] = detail.get("description") or ""
+
+    with ThreadPoolExecutor(max_workers=_SMART_WORKERS) as pool:
+        list(pool.map(_one, entries))
+
+
+def cmd_smart(args):
+    import smart_search
+
+    query = " ".join(args.query or []).strip()
+    if not query:
+        raise BoothError("smart 需要需求描述，如: booth smart 适用于Rexouium素体的服装")
+    sort, sort_note = effective_sort(args.sort, args.page)
+    args.sort = sort
+
+    # 1) 需求理解：AI 关键词 + 说明文核实词（未配 AI 或 --no-ai 时降级）
+    mode, kws_ai, desc_kws, ai_note = "direct", [], [], ""
+    backend = None if args.no_ai else smart_search.ai_backend()
+    if backend:
+        mode = "ai"
+        try:
+            kws_ai, desc_kws = smart_search.translate_keywords(query, **backend)
+            if smart_search.looks_chinese(query):
+                mode = "zh-ai"
+        except Exception as e:
+            ai_note = f"⚠ AI 需求解析不可用：{smart_search.friendly_ai_error(e)}（已用原词检索）"
+            kws_ai, desc_kws = [], []
+
+    # 2) 检索词：AI 词 → 变体扩展；无 AI 词时对原词朴素分词（读音变体照常）
+    if kws_ai:
+        kws = smart_search.expand_reading_variants(kws_ai)
+    else:
+        kws = smart_search.expand_reading_variants(
+            [t for t in re.split(r"[\s/、，,]+", query) if len(t.strip()) >= 2] or [query])
+    terms = smart_search.build_search_terms(kws)
+
+    # 3) 分词合并搜索 → 空结果回忆兜底 → 网络检索兜底
+    merged, first_res, last_err = _merged_search(terms, args)
+    recall_kws = []
+    if not merged and backend and not args.no_ai:
+        try:
+            recall_kws = smart_search.recall_products(
+                query, base_url=backend["base_url"], api_key=backend["api_key"],
+                model=backend["model"], timeout=backend["timeout"])[:2]
+        except Exception as e:
+            print(f"警告: 知名商品回忆失败: {smart_search.friendly_ai_error(e)}",
+                  file=sys.stderr)
+        if recall_kws:
+            terms2 = smart_search.build_search_terms(
+                smart_search.expand_reading_variants(recall_kws))
+            merged, first_res, last_err = _merged_search(terms2, args, via="回忆")
+            if merged:
+                mode = (mode + "+recall").lstrip("+")
+    web_note = ""
+    if not merged and not args.no_webfind:
+        import os
+        ids = smart_search.find_booth_item_ids(
+            (kws_ai or recall_kws or [query])[0],
+            exa_api_key=os.environ.get("EXA_API_KEY", "").strip())
+        if ids:
+            for iid in ids[:3]:
+                try:
+                    it = trim_item(fetch_item(str(iid), "ja"), desc_len=200)
+                except BoothError:
+                    continue
+                it["via"] = "网络检索"
+                merged.append(it)
+            mode = (mode + "+webfind").lstrip("+")
+            web_note = "（站内搜索无果，以下为网络检索命中，供参考）"
+    if not merged:
+        if last_err:
+            raise BoothError(f"smart 搜索失败: {last_err}")
+        msg = f"Booth 上没搜到「{query}」"
+        if args.json:
+            print(json.dumps({"query": query, "mode": mode, "ai_keywords": kws_ai,
+                              "keywords": terms, "desc_keywords": desc_kws,
+                              "ai_note": ai_note or None, "total": 0, "count": 0,
+                              "items": []}, ensure_ascii=False, indent=2))
+            return
+        print(msg + (f"\n{ai_note}" if ai_note else ""))
+        return
+
+    # 4) 描述核实：拉详情（简介扩长），说明文/标题含核实词的置顶并注明
+    total = first_res.get("total") if first_res else None
+    has_next = first_res.get("has_next") if first_res else False
+    desc_note = None
+    if desc_kws:
+        _enrich_details(merged[:_SMART_DETAIL_POOL], desc_len=_SMART_DETAIL_DESC_LEN)
+        merged = smart_search.desc_boost(merged, terms + kws_ai, desc_kws)
+        n_hit = sum(1 for it in merged if smart_search.desc_hit(it, desc_kws))
+        desc_note = (f"已按商品说明核实「{' / '.join(desc_kws[:2])}」:{n_hit} 件命中"
+                     if n_hit else "商品说明里未核实到对应信息，按标题相关度展示")
+    else:
+        _enrich_details(merged[:args.limit])
+
+    items = [{k: v for k, v in it.items() if k != "_desc"}
+             for it in merged[:args.limit]]
+
+    if args.json:
+        print(json.dumps({
+            "query": query, "mode": mode, "ai_keywords": kws_ai,
+            "keywords": terms, "recall_keywords": recall_kws,
+            "desc_keywords": desc_kws, "desc_note": desc_note,
+            "sort_note": sort_note or None, "ai_note": ai_note or None,
+            "web_note": web_note or None,
+            "total": total, "count": len(items), "has_next": has_next,
+            "items": items,
+        }, ensure_ascii=False, indent=2))
+        return
+    head = f"共 {total:,} 件，显示前 {len(items)} 件{sort_note}" if total else f"前 {len(items)} 件{sort_note}"
+    if terms:
+        head += f"\n检索词: {' / '.join(terms[:3])}"
+    if desc_note:
+        head += f"\n{desc_note}"
+    if web_note:
+        head += f"\n{web_note}"
+    if ai_note:
+        head += f"\n{ai_note}"
+    print(head + "\n")
+    for it in items:
+        price = f"¥{it['price']:,}" if it["price"] is not None else "价格未知"
+        flags = "R-18" if it.get("is_adult") else ""
+        via = f"[{it['via']}]" if it.get("via") else ""
+        print(f"#{it['id']}  {price}  {it['shop']['name'] or ''}({it['shop']['subdomain'] or ''})"
+              f"  {flags}  {via}")
+        print(f"    {it['name']}")
         print(f"    {it['url']}")
 
 
@@ -738,10 +960,12 @@ def cmd_imgsearch(args):
 # 子进程调用 `booth bot '<json>'`（或 stdin 管道），返回统一 JSON 信封，
 # 永不抛栈、退出码恒为 0，ok 字段表达成败。详见 QQBOT.md。
 
-BOT_ACTIONS = ("search", "item", "shop", "imgsearch")
-_BOT_POSITIONAL = {"search": "query", "item": "id", "shop": "shop", "imgsearch": "image"}
+BOT_ACTIONS = ("search", "item", "shop", "imgsearch", "smart")
+_BOT_POSITIONAL = {"search": "query", "item": "id", "shop": "shop",
+                   "imgsearch": "image", "smart": "query"}
 _BOT_LIST_FLAGS = ("tag", "or_word", "exclude")
-_BOT_BOOL_FLAGS = ("vrc", "in_stock", "full", "headless", "no_cache")
+_BOT_BOOL_FLAGS = ("vrc", "no_vrc", "in_stock", "full", "headless", "no_cache",
+                   "no_ai", "no_webfind")
 
 
 def bot_params_to_argv(action, params):
@@ -844,7 +1068,10 @@ def build_parser():
     ps.add_argument("--adult", default="include", choices=("exclude", "include", "only"),
                     help="R-18: include=联合搜索(默认,结果带 is_adult 标记) exclude=仅全年齢 only=仅R-18")
     ps.add_argument("--tag", action="append", help="按标签过滤，可多次")
-    ps.add_argument("--vrc", action="store_true", help="等价 --tag VRChat")
+    ps.add_argument("--vrc", dest="vrc", action="store_true", default=True,
+                    help="收窄 VRChat 圈（--tag VRChat），默认开启")
+    ps.add_argument("--no-vrc", dest="vrc", action="store_false",
+                    help="关闭 VRChat 收窄，搜全站")
     ps.add_argument("--or-word", action="append", help="OR 关键词，可多次")
     ps.add_argument("--exclude", action="append", help="排除词，可多次")
     ps.add_argument("--min-price", type=int)
@@ -889,6 +1116,25 @@ def build_parser():
     pi2.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
     add_common(pi2)
     pi2.set_defaults(func=cmd_imgsearch)
+
+    pm = sub.add_parser("smart", help="VRC 对口智能搜索：需求式描述 → AI 关键词 + 说明文核实 + 分词合并",
+                        aliases=["sm"])
+    pm.add_argument("query", nargs="+", help="需求描述（中文/日文均可，如：适用于Rexouium素体的服装）")
+    pm.add_argument("--sort", default="popularity", choices=SORTS,
+                    help="排序（默认 popularity；翻页自动切新着）")
+    pm.add_argument("--adult", default="include", choices=("exclude", "include", "only"),
+                    help="R-18: include=联合搜索(默认,结果带 is_adult 标记) exclude=仅全年齢 only=仅R-18")
+    pm.add_argument("--no-vrc", dest="vrc", action="store_false",
+                    help="关闭 VRChat 收窄（默认收窄 VRChat 圈）")
+    pm.add_argument("--page", type=int, default=1)
+    pm.add_argument("--limit", type=int, default=6, help="最多返回条数（默认 6）")
+    pm.add_argument("--no-ai", action="store_true",
+                    help="跳过 AI 需求解析（仅分词+读音变体直搜；默认读 VISION_API_KEY 等 env）")
+    pm.add_argument("--no-webfind", action="store_true",
+                    help="禁用网络检索兜底（DDG/Exa）")
+    pm.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    add_common(pm)
+    pm.set_defaults(func=cmd_smart)
 
     pb = sub.add_parser("bot", help="bot 框架接入钩子：JSON 信封进出（见 QQBOT.md）")
     pb.add_argument("payload", nargs="?", help="JSON 请求，如 '{\"action\":\"search\",\"params\":{\"query\":\"VRChat\"}}'；缺省读 stdin")
