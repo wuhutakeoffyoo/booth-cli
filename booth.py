@@ -43,7 +43,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -710,6 +710,8 @@ def cmd_smart(args):
     query = " ".join(args.query or []).strip()
     if not query:
         raise BoothError("smart 需要需求描述，如: booth smart 适用于Rexouium素体的服装")
+    if smart_search.pykakasi is None:
+        raise BoothError(smart_search.PYKAKASI_HINT)
     sort, sort_note = effective_sort(args.sort, args.page)
     args.sort = sort
 

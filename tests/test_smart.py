@@ -69,10 +69,7 @@ class TestVariantsAndTerms(unittest.TestCase):
         self.assertEqual(len(out), 6)
 
     def test_expand_reading_variants(self):
-        try:
-            import pykakasi  # noqa: F401
-        except ImportError:
-            self.skipTest("pykakasi not installed")
+        # pykakasi 为必装依赖，测试不跳过
         out = smart_search.expand_reading_variants(["信濃 3Dモデル"])
         self.assertEqual(out[0], "信濃 3Dモデル")
         self.assertIn("しなの 3Dモデル", out[1:])

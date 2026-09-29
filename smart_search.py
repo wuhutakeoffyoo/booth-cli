@@ -12,7 +12,8 @@ AI 后端为 OpenAI 兼容 chat/completions，环境变量与 vrc-booth-bot 同�
 （同机部署时一份 .env 两边通用）：
   VISION_API_KEY / VISION_BASE_URL / VISION_MODEL / VISION_TIMEOUT
   兜底：AI_FALLBACK_API_KEY / AI_FALLBACK_BASE_URL / AI_FALLBACK_MODEL
-零第三方依赖：AI 调用与网络检索走 urllib；pykakasi 缺失时自动降级。
+零第三方依赖的边界：除标准库外，pykakasi 为**必装依赖**（假名读音变体，
+booth smart 依赖它；缺装时给出明确安装提示）。
 """
 import base64
 import ipaddress
@@ -23,6 +24,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+try:
+    import pykakasi  # 必装依赖（假名读音变体）；延迟到调用点报错以便给出安装提示
+except ImportError:  # pragma: no cover
+    pykakasi = None
+
+PYKAKASI_HINT = "booth smart 需要 pykakasi（假名读音变体，必装依赖）: pip install pykakasi"
 
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -101,28 +109,23 @@ def parse_recall(content: str) -> list:
 
 
 def expand_reading_variants(keywords: list) -> list:
-    """为关键词追加搜索变体：
-    1. pykakasi 汉字→平假名读音（信濃→しなの；Booth 标题词形不统一且搜索
-       不做跨字形归一）；pykakasi 未安装时跳过该维度。
+    """为关键词追加搜索变体（pykakasi 为必装依赖）：
+    1. 汉字→平假名读音（信濃→しなの；Booth 标题词形不统一且搜索不做跨字形归一）；
     2. 去空格连写形（ショコラ ドレス→ショコラドレス；Booth 分词为 AND 匹配，
        连写复合词必须整词命中）。"""
+    if pykakasi is None:
+        raise RuntimeError(PYKAKASI_HINT)
     out = []
     seen = set()
     seen_readings = set()
-    try:
-        import pykakasi
-        kks = pykakasi.kakasi()
-        kks.setMode("J", "H")  # 汉字→平假名读音（片假名保持原样）
-        conv = kks.getConverter()
-    except ImportError:
-        conv = None
+    kks = pykakasi.kakasi()
+    kks.setMode("J", "H")  # 汉字→平假名读音（片假名保持原样）
+    conv = kks.getConverter()
     for kw in keywords:
-        kw_reading = conv.do(kw) if conv is not None else kw
+        kw_reading = conv.do(kw)
         if kw_reading in seen_readings:
             continue  # 同读音关键词（リング/指輪/ゆびわ 类）只保留首个，节省槽位
-        forms = [kw]
-        if conv is not None:
-            forms.append(kw_reading)
+        forms = [kw, kw_reading]
         if " " in kw:
             forms.append(kw.replace(" ", ""))
         for form in forms:

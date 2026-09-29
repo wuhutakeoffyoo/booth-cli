@@ -1,7 +1,8 @@
 # booth-cli
 
 Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI agent 设计。
-零第三方依赖（Python 标准库实现），已安装为 `booth` 命令（`~/bin/booth` → 本目录 `booth.py`）。
+核心以 Python 标准库实现，唯一依赖 pykakasi（假名读音变体，`smart` 使用），
+已安装为 `booth` 命令（`~/bin/booth` → 本目录 `booth.py`）。
 
 运作原理、分层兜底思路、参考的开源项目与盲测方法论，见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -111,7 +112,8 @@ booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 
 ## 环境要求
 
-Python 3.8+，无第三方依赖。Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
+Python 3.8+；安装依赖：`pip install -r requirements.txt`（pykakasi，假名读音变体，必装）。
+Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
 
 ## AI Agent 技能文档
 

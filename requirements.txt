@@ -1,0 +1,2 @@
+# booth-cli 唯一的第三方依赖：假名读音变体（booth smart 使用，必装）
+pykakasi>=2.3
