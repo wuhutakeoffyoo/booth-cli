@@ -21,15 +21,18 @@ cfg = get_plugin_config(Config)
 BLIND_DIR = Path.home() / (sys.argv[1] if len(sys.argv) > 1 else "blind100")
 TRUTH = BLIND_DIR / "truth.json"
 
-PROMPT = ("你是中国 VRChat 玩家，在 Booth.pm 看到了这个商品页面，想之后能搜到它。"
-          "请给出你会输入的中文搜索词：2-8 个字的自然中文短语（可包含你知道的商品名原文、"
-          "角色名中文叫法或类型词）。只输出短语本身，不要任何解释。")
+PROMPT = ("你是中国 VRChat 玩家，想在 Booth.pm 找到这类商品。按你的真实输入习惯，"
+          "给出你会输入的中文搜索词。要求：\n"
+          "1. 优先日常泛称/部位/用途词（例：铃铛、猫耳、尾巴、项圈、呆毛、JK制服、"
+          "巫女服、眼镜、和服、泡泡袖），2-6 个字；\n"
+          "2. 只有知名原创角色/模型才可用其通用中文叫法，禁止按商品标题音译或生造词；\n"
+          "3. 像在聊天框里随手打的那样自然，不要形容词堆砌。只输出短语本身，不要解释。")
 
 
 def make_payload(title, category):
     return {
         "model": cfg.vision_model,
-        "messages": [{"role": "user", "content": f"{PROMPT}\n商品标题：{title}\n分类：{category or '未知'}"}],
+        "messages": [{"role": "user", "content": f"{PROMPT}\n商品分类：{category or '未知'}\n商品标题（仅供了解这是什么，禁止照抄或音译名称）：{title}"}],
         "temperature": 0.6,
         "max_tokens": 2000,
     }

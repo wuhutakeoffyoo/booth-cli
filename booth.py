@@ -748,6 +748,7 @@ def cmd_smart(args):
     terms = smart_search.build_search_terms(kws)
 
     # 3) 分词合并搜索 → 空结果回忆兜底 → 网络检索兜底
+    used_terms = terms
     merged, first_res, last_err = _merged_search(terms, args)
     recall_kws = []
     if not merged and backend and not args.no_ai:
@@ -761,6 +762,7 @@ def cmd_smart(args):
         if recall_kws:
             terms2 = smart_search.build_search_terms(
                 smart_search.expand_reading_variants(recall_kws))
+            used_terms = terms2
             merged, first_res, last_err = _merged_search(terms2, args, via="回忆")
             if merged:
                 mode = (mode + "+recall").lstrip("+")
@@ -804,6 +806,13 @@ def cmd_smart(args):
         desc_note = (f"已按商品说明核实「{' / '.join(desc_kws[:2])}」:{n_hit} 件命中"
                      if n_hit else "商品说明里未核实到对应信息，按标题相关度展示")
     else:
+        # 标题命中足够时丢弃不相关填充（多词合并混入的 popularity 垃圾）
+        if len(merged) > args.limit:
+            low = [t.lower() for t in used_terms if t]
+            matched = [it for it in merged
+                       if any(t in (it.get("name") or "").lower() for t in low)]
+            if len(matched) >= args.limit:
+                merged = matched
         _enrich_details(merged[:args.limit])
 
     items = [{k: v for k, v in it.items() if k != "_desc"}
