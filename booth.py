@@ -43,7 +43,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
