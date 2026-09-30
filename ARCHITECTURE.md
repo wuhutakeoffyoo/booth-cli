@@ -89,6 +89,8 @@ Booth 标题多是日文原名，原词直搜往往就是最优解。含 4 字�
 
 > 本节策略已下沉为 CLI 的 `booth smart`（`smart_search.py` 为 bot 侧 vision/webfind/rank
 > 的零依赖移植，环境变量同名共用）——两仓一套策略，两个入口。
+> 旧「强制翻译」链路（`vision.translate_keywords` / `smart_search.translate_keywords` /
+> `_looks_chinese` 等）保留归档、未启用——是否翻译已改由方案阶段模型自决。
 
 1. **搜索方案**（`vision.plan_search` / `smart_search.plan_search`）：LLM 理解需求输出
    单词级日语关键词 + desc_keywords + translated 标记——**翻译只是可选项**，输入已是

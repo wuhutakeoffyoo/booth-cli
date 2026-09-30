@@ -45,8 +45,9 @@ _SIMPLIFIED_RE = re.compile(
 
 
 def looks_chinese(text: str) -> bool:
-    """中文判定：先查简体字特有形（混片假名的中文查询也算中文），
-    再查假名（有假名无简体 → 日语），最后默认有汉字即中文。"""
+    """【旧链路·归档未启用】中文判定：先查简体字特有形（混片假名的中文查询也算中文），
+    再查假名（有假名无简体 → 日语），最后默认有汉字即中文。
+    是否翻译已改由 plan_search 的模型自决（translated 标记），本函数仅存档/测试用。"""
     if _SIMPLIFIED_RE.search(text or ""):
         return True
     if _KANA_RE.search(text or ""):
@@ -291,6 +292,11 @@ def evaluate_results(query: str, keywords: list, titles: list, *,
 
 # ---------------------------------------------------------------- AI 后端
 
+# ---------------------------------------------------------------- 旧链路（归档未启用）
+# 下方「强制翻译」链路已被智能体化方案（plan_search，翻译由模型自决）取代。
+# 代码保留备查/复用：translate_keywords / translate_keywords_cli / looks_chinese。
+# 活动路径（cmd_smart）不再调用它们。
+
 # 中文/需求描述 → Booth 搜索方案的提示词：标题关键词 + 说明文核实词
 _TRANSLATE_PROMPT = (
     "用户在 Booth.pm（日本同人/VRChat 素材市场）找商品，输入的是中文口语/需求描述。"
@@ -449,7 +455,9 @@ def friendly_ai_error(e: Exception) -> str:
 
 def translate_keywords(text: str, *, base_url: str, api_key: str, model: str,
                        timeout: int = 60) -> tuple:
-    """中文需求 → (日语标题关键词, 描述核实关键词)。输出不含 JSON 时带强化指令重试一次。"""
+    """【旧链路·归档未启用】中文需求 → (日语标题关键词, 描述核实关键词)。
+    已被 plan_search（模型自决是否翻译）取代，保留备查。
+    输出不含 JSON 时带强化指令重试一次。"""
     guard_api_base(base_url)
     url = base_url.rstrip("/") + "/chat/completions"
     prompt = f"{_TRANSLATE_PROMPT}\n用户需求：{text}"
