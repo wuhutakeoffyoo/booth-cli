@@ -715,18 +715,29 @@ def cmd_smart(args):
     sort, sort_note = effective_sort(args.sort, args.page)
     args.sort = sort
 
-    # 1) 需求理解：AI 关键词 + 说明文核实词（未配 AI 或 --no-ai 时降级）
+    # 1) 需求理解：AI 关键词 + 说明文核实词（未配 AI 或 --no-ai 时降级；
+    #    主后端失败自动切兜底后端，与 bot 同款环境变量）
+    def _try_translate(bk):
+        kws, dkws = smart_search.translate_keywords(query, **bk)
+        return kws, dkws, ("zh-ai" if smart_search.looks_chinese(query) else "ai")
+
     mode, kws_ai, desc_kws, ai_note = "direct", [], [], ""
     backend = None if args.no_ai else smart_search.ai_backend()
     if backend:
-        mode = "ai"
         try:
-            kws_ai, desc_kws = smart_search.translate_keywords(query, **backend)
-            if smart_search.looks_chinese(query):
-                mode = "zh-ai"
-        except Exception as e:
-            ai_note = f"⚠ AI 需求解析不可用：{smart_search.friendly_ai_error(e)}（已用原词检索）"
-            kws_ai, desc_kws = [], []
+            kws_ai, desc_kws, mode = _try_translate(backend)
+        except Exception as main_err:
+            fb = smart_search.ai_fallback_backend()
+            if fb:
+                try:
+                    kws_ai, desc_kws, mode = _try_translate(fb)
+                    backend = fb
+                except Exception as fb_err:
+                    ai_note = f"⚠ AI 需求解析不可用：{smart_search.friendly_ai_error(fb_err)}（已用原词检索）"
+            else:
+                ai_note = f"⚠ AI 需求解析不可用：{smart_search.friendly_ai_error(main_err)}（已用原词检索）"
+            if ai_note:
+                kws_ai, desc_kws = [], []
 
     # 2) 检索词：AI 词 → 变体扩展；无 AI 词时对原词朴素分词（读音变体照常）
     if kws_ai:
