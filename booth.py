@@ -715,62 +715,97 @@ def cmd_smart(args):
     sort, sort_note = effective_sort(args.sort, args.page)
     args.sort = sort
 
-    # 1) 需求理解：AI 关键词 + 说明文核实词（未配 AI 或 --no-ai 时降级；
+    # 1) 阶段 1：搜索方案（LLM 自行决定是否翻译；--no-ai/无配置退化为原词分词直搜；
     #    主后端失败自动切兜底后端，与 bot 同款环境变量）
-    def _try_translate(bk):
-        kws, dkws = smart_search.translate_keywords(query, **bk)
-        return kws, dkws, ("zh-ai" if smart_search.looks_chinese(query) else "ai")
+    def _try_plan(bk):
+        kws, dkws, translated = smart_search.plan_search(query, **bk)
+        return kws, dkws, ("plan-translated" if translated else "plan")
 
     mode, kws_ai, desc_kws, ai_note = "direct", [], [], ""
     backend = None if args.no_ai else smart_search.ai_backend()
     if backend:
         try:
-            kws_ai, desc_kws, mode = _try_translate(backend)
+            kws_ai, desc_kws, mode = _try_plan(backend)
         except Exception as main_err:
             fb = smart_search.ai_fallback_backend()
             if fb:
                 try:
-                    kws_ai, desc_kws, mode = _try_translate(fb)
+                    kws_ai, desc_kws, mode = _try_plan(fb)
                     backend = fb
                 except Exception as fb_err:
-                    ai_note = f"⚠ AI 需求解析不可用：{smart_search.friendly_ai_error(fb_err)}（已用原词检索）"
+                    ai_note = f"⚠ AI 方案规划不可用：{smart_search.friendly_ai_error(fb_err)}（已用原词检索）"
             else:
-                ai_note = f"⚠ AI 需求解析不可用：{smart_search.friendly_ai_error(main_err)}（已用原词检索）"
+                ai_note = f"⚠ AI 方案规划不可用：{smart_search.friendly_ai_error(main_err)}（已用原词检索）"
             if ai_note:
                 kws_ai, desc_kws = [], []
 
     # 2) 检索词：AI 词 → 变体扩展；无 AI 词时对原词朴素分词（读音变体照常）
     if kws_ai:
         kws = smart_search.expand_reading_variants(kws_ai)
+        terms = smart_search.build_search_terms(kws)
     else:
         kws = smart_search.expand_reading_variants(
             [t for t in re.split(r"[\s/、，,]+", query) if len(t.strip()) >= 2] or [query])
-    terms = smart_search.build_search_terms(kws)
+        terms = smart_search.build_search_terms(kws)
 
-    # 3) 分词合并搜索 → 空结果回忆兜底 → 网络检索兜底
-    used_terms = terms
-    merged, first_res, last_err = _merged_search(terms, args)
-    recall_kws = []
-    if not merged and backend and not args.no_ai:
+    # 3) 分词合并搜索 → 标题裁剪 → 结果评估（不满意第二轮重搜并再评估）
+    used_terms = terms or [query]
+    merged, first_res, last_err = _merged_search(used_terms, args)
+    if not merged and terms:
+        # 方案词无果，退回原词直搜
+        merged, first_res2, last_err = _merged_search([query], args)
+        if merged and first_res2 and first_res2.get("total"):
+            first_res = first_res2
+    if not desc_kws and len(merged) > args.limit:
+        # 标题命中足够时丢弃不相关填充（评估看的就是裁剪后的候选）
+        low = [t.lower() for t in used_terms if t]
+        matched = [it for it in merged
+                   if any(t in (it.get("name") or "").lower() for t in low)]
+        if len(matched) >= args.limit:
+            merged = matched
+
+    eval_note = ""
+    if merged and backend:
         try:
-            recall_kws = smart_search.recall_products(
-                query, base_url=backend["base_url"], api_key=backend["api_key"],
-                model=backend["model"], timeout=backend["timeout"])[:2]
-        except Exception as e:
-            print(f"警告: 知名商品回忆失败: {smart_search.friendly_ai_error(e)}",
+            titles = [f"{i}. {(it.get('name') or '')[:44]}"
+                      for i, it in enumerate(merged[:12], 1)]
+            ev = smart_search.evaluate_results(query, kws_ai or used_terms,
+                                               titles, **backend)
+            print(f"[eval] 第一轮: {ev.get('verdict')} {ev.get('reason')}",
                   file=sys.stderr)
-        if recall_kws:
-            terms2 = smart_search.build_search_terms(
-                smart_search.expand_reading_variants(recall_kws))
-            used_terms = terms2
-            merged, first_res, last_err = _merged_search(terms2, args, via="回忆")
-            if merged:
-                mode = (mode + "+recall").lstrip("+")
+            if ev.get("verdict") == "retry" and ev.get("keywords"):
+                print("[eval] 第一轮结果不理想，执行第二轮搜索…", file=sys.stderr)
+                terms2 = smart_search.build_search_terms(
+                    smart_search.expand_reading_variants(ev["keywords"]))
+                if terms2:
+                    merged2, first_res2, _ = _merged_search(terms2, args)
+                    if merged2:
+                        seen = {it["id"] for it in merged2}
+                        merged = merged2 + [it for it in merged
+                                            if it["id"] not in seen]
+                        if first_res2 and first_res2.get("total"):
+                            first_res = first_res2
+                        used_terms = terms2
+                        try:
+                            titles2 = [f"{i}. {(it.get('name') or '')[:44]}"
+                                       for i, it in enumerate(merged[:12], 1)]
+                            ev2 = smart_search.evaluate_results(query, terms2,
+                                                                titles2, **backend)
+                            eval_note = ("第二轮结果已按需求确认"
+                                         if ev2.get("verdict") == "ok" else
+                                         "两轮搜索后仍未完全确认，以下为最接近的结果")
+                        except Exception as e2:
+                            print(f"[eval] 第二轮评估失败: {e2}", file=sys.stderr)
+                            eval_note = "已完成第二轮搜索"
+                else:
+                    eval_note = "第二轮搜索无结果"
+        except Exception as e:
+            print(f"[eval] 结果评估失败（按第一轮返回）: {e}", file=sys.stderr)
     web_note = ""
     if not merged and not args.no_webfind:
         import os
         ids = smart_search.find_booth_item_ids(
-            (kws_ai or recall_kws or [query])[0],
+            (kws_ai or [query])[0],
             exa_api_key=os.environ.get("EXA_API_KEY", "").strip())
         if ids:
             for iid in ids[:3]:
@@ -806,13 +841,6 @@ def cmd_smart(args):
         desc_note = (f"已按商品说明核实「{' / '.join(desc_kws[:2])}」:{n_hit} 件命中"
                      if n_hit else "商品说明里未核实到对应信息，按标题相关度展示")
     else:
-        # 标题命中足够时丢弃不相关填充（多词合并混入的 popularity 垃圾）
-        if len(merged) > args.limit:
-            low = [t.lower() for t in used_terms if t]
-            matched = [it for it in merged
-                       if any(t in (it.get("name") or "").lower() for t in low)]
-            if len(matched) >= args.limit:
-                merged = matched
         _enrich_details(merged[:args.limit])
 
     items = [{k: v for k, v in it.items() if k != "_desc"}
@@ -821,8 +849,9 @@ def cmd_smart(args):
     if args.json:
         print(json.dumps({
             "query": query, "mode": mode, "ai_keywords": kws_ai,
-            "keywords": terms, "recall_keywords": recall_kws,
+            "keywords": terms,
             "desc_keywords": desc_kws, "desc_note": desc_note,
+            "eval_note": eval_note or None,
             "sort_note": sort_note or None, "ai_note": ai_note or None,
             "web_note": web_note or None,
             "total": total, "count": len(items), "has_next": has_next,
@@ -832,6 +861,8 @@ def cmd_smart(args):
     head = f"共 {total:,} 件，显示前 {len(items)} 件{sort_note}" if total else f"前 {len(items)} 件{sort_note}"
     if terms:
         head += f"\n检索词: {' / '.join(terms[:3])}"
+    if eval_note:
+        head += f"\n{eval_note}"
     if desc_note:
         head += f"\n{desc_note}"
     if web_note:

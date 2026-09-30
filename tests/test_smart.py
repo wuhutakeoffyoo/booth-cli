@@ -96,6 +96,27 @@ class TestDescRank(unittest.TestCase):
         self.assertEqual([it["id"] for it in out], [2, 3, 1, 4])
 
 
+    def test_parse_plan(self):
+        kws, dkws, translated = smart_search.parse_plan(
+            '{"keywords": ["鈴", "ベル"], "desc_keywords": ["Rexouium"], '
+            '"translated": true}')
+        self.assertEqual(kws, ["鈴", "ベル"])
+        self.assertEqual(dkws, ["Rexouium"])
+        self.assertTrue(translated)
+        kws, dkws, translated = smart_search.parse_plan(
+            '{"keywords": ["シエル"], "translated": false}')
+        self.assertEqual(kws, ["シエル"])
+        self.assertFalse(translated)
+
+    def test_parse_evaluation(self):
+        ev = smart_search.parse_evaluation(
+            '{"verdict": "retry", "reason": "返回的是鸟居", "keywords": ["鈴"]}')
+        self.assertEqual(ev["verdict"], "retry")
+        self.assertEqual(ev["keywords"], ["鈴"])
+        with self.assertRaises(smart_search.AiError):
+            smart_search.parse_evaluation("no json")
+
+
 class TestAiBackendGuard(unittest.TestCase):
     def test_guard_api_base(self):
         for bad in ("http://opencode.ai/v1", "https://localhost/v1",
