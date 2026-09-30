@@ -129,9 +129,15 @@ class TestDescRank(unittest.TestCase):
         self.assertEqual(smart_search.apply_industry_synonyms("墨镜", ["メガネ"]),
                          ["サングラス", "メガネ"])  # query 命中：行业词插最前
         out = smart_search.apply_industry_synonyms("枪械", ["銃"])
-        self.assertEqual(out, ["銃", "ガン"])  # 关键词命中：同义词紧随其后
+        self.assertEqual(out[0], "銃ギミック")  # 同义词按产量优先序
+        self.assertIn("銃", out)
         self.assertEqual(smart_search.apply_industry_synonyms("猫耳", ["ネコミミ"]),
                          ["ネコミミ"])  # 无命中保序返回
+
+    def test_reading_variant_single_kanji_skipped(self):
+        self.assertEqual(smart_search.expand_reading_variants(["銃"]), ["銃"])
+        out = smart_search.expand_reading_variants(["信濃 3Dモデル"])
+        self.assertIn("しなの 3Dモデル", out)
 
     def test_conservative_retry(self):
         titles = ["ベルト", "ピストルベルト", "Bell Hair", "x", "y", "z"]

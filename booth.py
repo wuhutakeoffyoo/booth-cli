@@ -640,6 +640,9 @@ def _search_once(term, base_args):
     ns.query = [term]
     ns.category = None
     ns.event = None
+    # 单词搜索深度 15：高热度泛词 popularity 头部的标题常不含词（Booth 搜索
+    # 匹配描述），加深让标题命中的候选浮出，供裁剪与排序使用
+    ns.limit = max(getattr(ns, "limit", 6) or 6, 15)
     # smart 解析器没有的 search 字段补默认值（build_search_url 需要全量字段）
     ns.lang = getattr(ns, "lang", "ja")
     ns.type = getattr(ns, "type", "all")
