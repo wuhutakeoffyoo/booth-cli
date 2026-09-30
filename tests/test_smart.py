@@ -117,6 +117,31 @@ class TestDescRank(unittest.TestCase):
             smart_search.parse_evaluation("no json")
 
 
+    def test_parse_evaluation_hits(self):
+        ev = smart_search.parse_evaluation(
+            '{"verdict": "ok", "hits": ["a", "b", "c"], "reason": "r"}')
+        self.assertEqual(ev["verdict"], "ok")
+        self.assertEqual(len(ev["hits"]), 3)
+
+    def test_apply_industry_synonyms(self):
+        self.assertEqual(smart_search.apply_industry_synonyms("墨镜", []),
+                         ["サングラス"])
+        self.assertEqual(smart_search.apply_industry_synonyms("墨镜", ["メガネ"]),
+                         ["サングラス", "メガネ"])  # query 命中：行业词插最前
+        out = smart_search.apply_industry_synonyms("枪械", ["銃"])
+        self.assertEqual(out, ["銃", "ガン"])  # 关键词命中：同义词紧随其后
+        self.assertEqual(smart_search.apply_industry_synonyms("猫耳", ["ネコミミ"]),
+                         ["ネコミミ"])  # 无命中保序返回
+
+    def test_conservative_retry(self):
+        titles = ["ベルト", "ピストルベルト", "Bell Hair", "x", "y", "z"]
+        self.assertTrue(smart_search.conservative_retry("ok", titles, ["ベル"]))
+        self.assertFalse(smart_search.conservative_retry(
+            "ok", ["チョーカー", "首輪風チョーカー", "レッグチョーカー", "x", "y", "z"],
+            ["チョーカー"]))
+        self.assertFalse(smart_search.conservative_retry("retry", titles, ["ベル"]))
+
+
 class TestAiBackendGuard(unittest.TestCase):
     def test_guard_api_base(self):
         for bad in ("http://opencode.ai/v1", "https://localhost/v1",

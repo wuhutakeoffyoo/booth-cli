@@ -680,8 +680,13 @@ def _merged_search(terms, base_args, via="关键词"):
                     merged.append(it)
     low = [t.lower() for t in terms if t]
     if low:
-        merged.sort(key=lambda it: not any(
-            k in (it.get("name") or "").lower() for k in low))
+        # 命中更多检索词的优先；同分内按首个命中词序位（首选词的命中优先于尾部词的子串噪音）
+        def _rank(it):
+            name = (it.get("name") or "").lower()
+            hit_idx = [i for i, t in enumerate(low) if t in name]
+            return (-len(hit_idx), hit_idx[0] if hit_idx else len(low))
+
+        merged.sort(key=_rank)
     return merged, first_res, last_err
 
 
@@ -739,8 +744,9 @@ def cmd_smart(args):
             if ai_note:
                 kws_ai, desc_kws = [], []
 
-    # 2) 检索词：AI 词 → 变体扩展；无 AI 词时对原词朴素分词（读音变体照常）
+    # 2) 检索词：AI 词 → 同义词种子 + 变体扩展；无 AI 词时对原词朴素分词
     if kws_ai:
+        kws_ai = smart_search.apply_industry_synonyms(query, kws_ai)
         kws = smart_search.expand_reading_variants(kws_ai)
         terms = smart_search.build_search_terms(kws)
     else:
@@ -773,10 +779,26 @@ def cmd_smart(args):
                                                titles, **backend)
             print(f"[eval] 第一轮: {ev.get('verdict')} {ev.get('reason')}",
                   file=sys.stderr)
-            if ev.get("verdict") == "retry" and ev.get("keywords"):
+            # 保守 retry：评估员放行但标题命中率过低时仍触发二轮
+            need_retry = (ev.get("verdict") == "retry" and bool(ev.get("keywords"))) or \
+                smart_search.conservative_retry(ev.get("verdict", ""),
+                                                [it.get("name") or "" for it in merged[:6]],
+                                                used_terms)
+            if need_retry:
                 print("[eval] 第一轮结果不理想，执行第二轮搜索…", file=sys.stderr)
-                terms2 = smart_search.build_search_terms(
-                    smart_search.expand_reading_variants(ev["keywords"]))
+                if ev.get("keywords"):
+                    terms2 = smart_search.build_search_terms(
+                        smart_search.expand_reading_variants(ev["keywords"]))
+                else:
+                    try:
+                        kws2, _, _ = smart_search.plan_search(
+                            query, feedback=f"关键词 {used_terms[:4]} 无效（{ev.get('reason') or '候选不相关'}）",
+                            **backend)
+                        terms2 = smart_search.build_search_terms(
+                            smart_search.expand_reading_variants(kws2))
+                    except Exception as e2:
+                        print(f"[eval] 二轮重新规划失败: {e2}", file=sys.stderr)
+                        terms2 = []
                 if terms2:
                     merged2, first_res2, _ = _merged_search(terms2, args)
                     if merged2:
