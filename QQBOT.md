@@ -19,6 +19,7 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 | `action` | `search` / `item` / `shop` / `imgsearch` / `smart` / `version` |
 | `params` | 与 CLI 旗标同名的 snake_case 参数（`--or-word` → `"or_word"`，`--no-cache` → `"no_cache": true`） |
 | 平铺写法 | 也接受 `{"action":"search","query":"...","limit":5}` 直接把参数平铺在顶层 |
+| `context` | 1.4.0 起可选：request_id、max_requests、deadline，多个子进程共享同次查询的出站上限 |
 
 各 action 的 params：
 
@@ -44,6 +45,10 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 ```
 
 `data` 即各命令 `--json` 的原始输出（字段说明见 README / skill/SKILL.md）。
+
+携带 context 时，request_id 是 8–64 位 ASCII 字母/数字/下划线/短横线，max_requests 为 1–100 的整数，deadline 是不超过未来 15 分钟的有限 Unix 时间戳。相同 request_id 的子进程使用同机 SQLite 累计 used；同次查询显式增大 max_requests 可扩展上限，但不清零计数或延长原截止时间。缓存命中不增加 used。
+
+响应顶层增加可选 request_budget 对象（used、maximum），成功和失败均可携带；data 结构保持兼容。version 返回 capabilities 与 semantic_fingerprint，无网络和凭据读取。上下文控制 CLI 出站，框架仍需对整个 AI/消息处理任务设置总超时。
 
 ## 各框架接入示例
 

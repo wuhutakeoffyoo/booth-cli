@@ -42,8 +42,11 @@ from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
+import request_budget
+import uuid
+import search_evidence
 
-__version__ = "1.3.3"
+__version__ = "1.4.0"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -83,10 +86,10 @@ def _polite_wait():
     """保证距上一次出站请求至少 MIN_REQUEST_INTERVAL 秒（线程安全）。"""
     global _LAST_REQ_TS
     with _REQ_LOCK:
-        wait = MIN_REQUEST_INTERVAL - (time.monotonic() - _LAST_REQ_TS)
-        if wait > 0:
-            time.sleep(wait)
-        _LAST_REQ_TS = time.monotonic()
+        try:
+            _LAST_REQ_TS = request_budget.wait(MIN_REQUEST_INTERVAL)
+        except request_budget.BudgetError as e:
+            raise BoothError(str(e)) from e
 
 
 class BoothError(Exception):
@@ -176,13 +179,16 @@ def _retry_delay(attempt, headers=None):
     if headers:
         ra = headers.get("Retry-After")
         if ra:
-            try:
-                return min(float(ra), 45.0)
-            except ValueError:
+            if re.fullmatch(r"[0-9]+", str(ra).strip()):
+                try:
+                    return int(str(ra).strip())
+                except ValueError:
+                    pass
+            else:
                 try:
                     dt = email.utils.parsedate_to_datetime(ra)
                     delay = dt.timestamp() - time.time()
-                    return min(max(delay, 0.0), 45.0)
+                    return max(delay, 0.0)
                 except Exception:
                     pass
     return min(1.5 * (2 ** attempt), 15.0) + random.uniform(0.0, 1.0)
@@ -243,7 +249,14 @@ def http_get(url, *, json_accept=False, csrf=None, cache_ttl=0):
                     if e.code == 403 and b"Just a moment" in body:
                         raise BoothError(CLOUDFLARE_HINT)
                     last_err = BoothError(f"HTTP {e.code}（可能是限流或防护页）: {current}")
-                    time.sleep(_retry_delay(attempt, e.headers))
+                    delay = _retry_delay(attempt, e.headers)
+                    try:
+                        if e.code in (429, 503):
+                            request_budget.cooldown(delay)
+                        request_budget.retry_allowed(delay)
+                    except request_budget.BudgetError as budget_err:
+                        raise BoothError(str(budget_err)) from budget_err
+                    time.sleep(delay)
                     break  # 走外层重试
                 raise BoothError(f"HTTP {e.code}: {current}")
             except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
@@ -430,7 +443,8 @@ def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
         "tags": [t.get("name") for t in raw.get("tags") or []],
         "images": images,
         "variations": variations,
-        "description": clean_text(raw.get("description"))[:desc_len] or None,
+        "description": (clean_text(raw.get("description")) if desc_len is None or desc_len < 0
+                        else clean_text(raw.get("description"))[:desc_len]) or None,
     }
 
 
@@ -474,9 +488,9 @@ def build_search_url(args):
     else:
         path = f"/{lang}/items"
     params = {}
-    if query:
+    if query and (args.category or args.event):
         params["q"] = query
-    if args.sort != "new":
+    if args.sort != "popularity":
         params["sort"] = args.sort
     if args.type != "all":
         params["type"] = args.type
@@ -643,8 +657,6 @@ def cmd_shop(args):
 # 分词合并搜索 → 空结果回忆/网络检索兜底 → 拉详情按说明文匹配置顶。
 # 策略细节见 smart_search.py；AI 环境变量与 bot 同名，缺省自动降级直搜。
 
-_SMART_DETAIL_POOL = 15      # 描述核实时拉详情的候选池
-_SMART_DETAIL_DESC_LEN = 2000
 _SMART_WORKERS = 3           # 并发工作线程（出站仍受全局限速约束）
 
 
@@ -654,9 +666,7 @@ def _search_once(term, base_args):
     ns.query = [term]
     ns.category = None
     ns.event = None
-    # 单词搜索深度 15：高热度泛词 popularity 头部的标题常不含词（Booth 搜索
-    # 匹配描述），加深让标题命中的候选浮出，供裁剪与排序使用
-    ns.limit = max(getattr(ns, "limit", 6) or 6, 15)
+    # Reuse all candidates already present on this page; details stay bounded.
     # smart 解析器没有的 search 字段补默认值（build_search_url 需要全量字段）
     ns.lang = getattr(ns, "lang", "ja")
     ns.type = getattr(ns, "type", "all")
@@ -713,12 +723,14 @@ def _enrich_details(entries, desc_len=DEFAULT_DESC_LEN):
     from concurrent.futures import ThreadPoolExecutor
 
     def _one(it):
+        if it.get("detail_status") in ("available", "unavailable"):
+            return
         try:
             detail = trim_item(fetch_item(str(it["id"]), "ja"), desc_len=desc_len)
         except BoothError:
             it["detail_status"] = "unavailable"
             return
-        for k in ("wish_lists_count", "tags", "published_at"):
+        for k in ("wish_lists_count", "tags", "published_at", "category"):
             if detail.get(k):
                 it[k] = detail[k]
         it["_desc"] = detail.get("description") or ""
@@ -742,6 +754,10 @@ def item_matches_policy(item, adult="include", tag=None):
 
 def cmd_smart(args):
     import smart_search
+    if request_budget.context() is None:
+        with request_budget.query_context({"request_id": uuid.uuid4().hex,
+                "max_requests": 12, "deadline": time.time() + 180}):
+            return cmd_smart(args)
 
     query = " ".join(args.query or []).strip()
     if not query:
@@ -764,7 +780,7 @@ def cmd_smart(args):
             kws_ai, desc_kws, mode = _try_plan(backend)
         except Exception as main_err:
             fb = smart_search.ai_fallback_backend()
-            if fb:
+            if fb and fb != backend:
                 try:
                     kws_ai, desc_kws, mode = _try_plan(fb)
                     backend = fb
@@ -785,7 +801,7 @@ def cmd_smart(args):
             [t for t in re.split(r"[\s/、，,]+", query) if len(t.strip()) >= 2] or [query])
         terms = smart_search.build_search_terms(kws)
 
-    # 3) 分词合并搜索 → 标题裁剪 → 结果评估（不满意第二轮重搜并再评估）
+    # 3) 分词合并搜索 → 有上限的完整详情 → 来源证据评估 → 可选二轮
     used_terms = terms or [query]
     merged, first_res, last_err = _merged_search(used_terms, args)
     if not merged and terms:
@@ -793,22 +809,15 @@ def cmd_smart(args):
         merged, first_res2, last_err = _merged_search([query], args)
         if merged and first_res2 and first_res2.get("total"):
             first_res = first_res2
-    if not desc_kws and len(merged) > args.limit:
-        # 标题命中足够时丢弃不相关填充（评估看的就是裁剪后的候选）
-        low = [t.lower() for t in used_terms if t]
-        matched = [it for it in merged
-                   if any(t in (it.get("name") or "").lower() for t in low)]
-        if len(matched) >= args.limit:
-            merged = matched
-
     eval_note = ""
+    _enrich_details(merged[:min(args.limit, 6)], desc_len=-1)
     if merged and backend:
         try:
-            titles = [f"{i}. {(it.get('name') or '')[:44]}"
-                      for i, it in enumerate(merged[:12], 1)]
+            titles = search_evidence.candidate_lines(merged[:12], desc_kws or used_terms)
             ev = smart_search.evaluate_results(query, kws_ai or used_terms,
                                                titles, **backend)
             ev = smart_search.validate_evaluation(ev, titles)
+            ev = search_evidence.grounded_evaluation(ev, merged[:12], desc_kws)
             print(f"[eval] 第一轮: {ev.get('verdict')} {ev.get('reason')}",
                   file=sys.stderr)
             # 保守 retry：评估员放行但标题命中率过低时仍触发二轮
@@ -817,20 +826,23 @@ def cmd_smart(args):
                                                 [it.get("name") or "" for it in merged[:6]],
                                                 used_terms)
             if need_retry:
+                request_budget.context()["max_requests"] = 18
                 print("[eval] 第一轮结果不理想，执行第二轮搜索…", file=sys.stderr)
                 if ev.get("keywords"):
-                    terms2 = smart_search.build_search_terms(
-                        smart_search.expand_reading_variants(ev["keywords"]))
+                    terms2 = smart_search.build_search_terms(smart_search.expand_reading_variants(
+                        smart_search.apply_industry_synonyms(query, ev["keywords"])))
                 else:
                     try:
                         kws2, _, _ = smart_search.plan_search(
                             query, feedback=f"关键词 {used_terms[:4]} 无效（{ev.get('reason') or '候选不相关'}）",
                             **backend)
-                        terms2 = smart_search.build_search_terms(
-                            smart_search.expand_reading_variants(kws2))
+                        terms2 = smart_search.build_search_terms(smart_search.expand_reading_variants(
+                            smart_search.apply_industry_synonyms(query, kws2)))
                     except Exception as e2:
                         print(f"[eval] 二轮重新规划失败: {e2}", file=sys.stderr)
                         terms2 = []
+                previous = {str(term).casefold() for term in used_terms}
+                terms2 = [term for term in terms2 if str(term).casefold() not in previous][:3]
                 if terms2:
                     merged2, first_res2, _ = _merged_search(terms2, args)
                     if merged2:
@@ -841,19 +853,21 @@ def cmd_smart(args):
                             first_res = first_res2
                         used_terms = terms2
                         try:
-                            titles2 = [f"{i}. {(it.get('name') or '')[:44]}"
-                                       for i, it in enumerate(merged[:12], 1)]
+                            fresh = [it for it in merged if not it.get("detail_status")][:3]
+                            _enrich_details(fresh, desc_len=-1)
+                            titles2 = search_evidence.candidate_lines(merged[:12], desc_kws or used_terms)
                             ev2 = smart_search.evaluate_results(query, terms2,
                                                                 titles2, **backend)
                             ev2 = smart_search.validate_evaluation(ev2, titles2)
-                            eval_note = ("第二轮结果已按需求确认"
+                            ev2 = search_evidence.grounded_evaluation(ev2, merged[:12], desc_kws)
+                            eval_note = ("第二轮找到至少三条有来源证据的相关候选（适配以商品说明为准）"
                                          if ev2.get("verdict") == "ok" else
                                          "两轮搜索后仍未完全确认，以下为最接近的结果")
                         except Exception as e2:
                             print(f"[eval] 第二轮评估失败: {e2}", file=sys.stderr)
                             eval_note = "已完成第二轮搜索"
                 else:
-                    eval_note = "第二轮搜索无结果"
+                    eval_note = "未得到新的有效检索词，以下候选尚未完全核实"
         except Exception as e:
             print(f"[eval] 结果评估失败（按第一轮返回）: {e}", file=sys.stderr)
     web_note = ""
@@ -894,14 +908,13 @@ def cmd_smart(args):
     has_next = first_res.get("has_next") if first_res else False
     desc_note = None
     if desc_kws:
-        _enrich_details(merged[:_SMART_DETAIL_POOL], desc_len=_SMART_DETAIL_DESC_LEN)
         merged = smart_search.desc_boost(merged, terms + kws_ai, desc_kws)
         n_hit = sum(1 for it in merged if smart_search.description_status(it, desc_kws) == "mentioned")
         desc_note = (f"商品说明中提及「{' / '.join(desc_kws[:2])}」:{n_hit} 件（未确认兼容性）"
                      if n_hit else "商品说明未提供可确认的兼容性证据，按关键词相关度展示")
-    else:
-        _enrich_details(merged[:args.limit])
-
+    for item in merged:
+        item.setdefault("relevance_status", "unknown")
+    merged = search_evidence.promote_evidence(merged)
     items = [{k: v for k, v in it.items() if k != "_desc"}
              for it in merged[:args.limit]]
 
@@ -937,6 +950,7 @@ def cmd_smart(args):
               f"  {flags}  {via}")
         print(f"    {it['name']}")
         print(f"    {it['url']}")
+        print("    " + search_evidence.evidence_label(it))
 
 
 def cmd_imgsearch(args):
@@ -1113,17 +1127,20 @@ def bot_params_to_argv(action, params):
     return argv
 
 
-def _bot_envelope(ok, action, data=None, error=None):
+def _bot_envelope(ok, action, data=None, error=None, budget=None):
     payload = {"ok": ok, "action": action}
     if ok:
         payload["data"] = data
     else:
         payload["error"] = error
+    if budget is not None:
+        payload["request_budget"] = budget
     return json.dumps(payload, ensure_ascii=False)
 
 
 def cmd_bot(args):
     action = "?"
+    budget = None
     raw = (args.payload or "").strip()
     if not raw and not sys.stdin.isatty():
         raw = sys.stdin.read().strip()
@@ -1133,12 +1150,14 @@ def cmd_bot(args):
             raise BoothError("payload 必须是 JSON 对象，如 {\"action\":\"search\",\"params\":{...}}")
         action = str(req.get("action", "")).strip()
         if action == "version":
-            print(_bot_envelope(True, "version", {"version": __version__}))
+            print(_bot_envelope(True, "version", {"version": __version__,
+                "capabilities": ["shared_request_budget", "search_evidence"],
+                "semantic_fingerprint": request_budget.semantic_fingerprint()}))
             return
         if action not in BOT_ACTIONS:
             raise BoothError(f"未知 action: {action!r}（支持 {list(BOT_ACTIONS)} 与 version）")
         extra = req.get("params") if isinstance(req.get("params"), dict) else {}
-        flat = {k: v for k, v in req.items() if k not in ("action", "params")}
+        flat = {k: v for k, v in req.items() if k not in ("action", "params", "context")}
         params = {**flat, **extra}
 
         argv = bot_params_to_argv(action, params) + ["--json"]
@@ -1150,7 +1169,11 @@ def cmd_bot(args):
                 previous_cache = _NO_CACHE
                 try:
                     set_cache_enabled(not getattr(ns, "no_cache", False))
-                    ns.func(ns)
+                    with request_budget.query_context(req.get("context")):
+                        try:
+                            ns.func(ns)
+                        finally:
+                            budget = request_budget.statistics()
                 finally:
                     set_cache_enabled(not previous_cache)
         except SystemExit as e:  # argparse 用法错误
@@ -1160,9 +1183,9 @@ def cmd_bot(args):
             raise BoothError(msg[-1] if msg else f"参数解析失败（exit {exit_code}）")
 
         data = json.loads(out_buf.getvalue())
-        print(_bot_envelope(True, action, data))
+        print(_bot_envelope(True, action, data, budget=budget))
     except (BoothError, ValueError) as e:
-        print(_bot_envelope(False, action, error=str(e)[:300]))
+        print(_bot_envelope(False, action, error=str(e)[:300], budget=budget))
     except json.JSONDecodeError as e:
         print(_bot_envelope(False, action, error=f"payload/输出 JSON 解析失败: {e}"))
     except Exception as e:  # 信封接口永不抛栈
@@ -1213,7 +1236,7 @@ def build_parser():
 
     pi = sub.add_parser("item", help="商品详情", aliases=["i"])
     pi.add_argument("id", nargs="+", help="商品 ID 或 URL")
-    pi.add_argument("--desc-len", type=int, default=DEFAULT_DESC_LEN, help="简介截断长度")
+    pi.add_argument("--desc-len", type=int, default=DEFAULT_DESC_LEN, help="简介截断长度（-1 保留完整正文）")
     pi.add_argument("--full", action="store_true", help="输出原始完整 JSON")
     pi.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
     add_common(pi)

@@ -275,6 +275,14 @@ class TestBotHook(unittest.TestCase):
 
 
 class TestPoliteWait(unittest.TestCase):
+    def setUp(self):
+        import os
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.dict(os.environ, {"BOOTH_REQUEST_BUDGET_DB": str(Path(tmp.name) / "budget.sqlite3")})
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_global_interval(self):
         import time as _time
         booth._LAST_REQ_TS = 0.0
