@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 import urllib.error
@@ -19,6 +20,13 @@ import smart_search
 
 
 class TestAuditRegression(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.dict(os.environ, {"BOOTH_REQUEST_BUDGET_DB": str(Path(tmp.name) / "budget.sqlite3")})
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_authenticated_redirects_do_not_send_second_request(self):
         seen = []
 
@@ -98,6 +106,24 @@ class TestAuditRegression(unittest.TestCase):
             booth.cmd_search(args)
         self.assertEqual(args.sort, "new")
         self.assertIn("翻页", json.loads(output.getvalue())["sort_note"])
+
+    def test_canonical_search_url_does_not_duplicate_query_or_default_sort(self):
+        args = booth.build_parser().parse_args(["search", "鈴", "--sort", "popularity"])
+        url = booth.build_search_url(args)
+        params = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.assertNotIn("q", params)
+        self.assertNotIn("sort", params)
+        self.assertIn("/search/", url)
+
+    def test_new_and_liked_sort_are_explicit_and_category_keeps_query(self):
+        for sort in ("new", "liked"):
+            args = booth.build_parser().parse_args(["search", "衣装", "--sort", sort, "--page", "2"])
+            params = urllib.parse.parse_qs(urllib.parse.urlsplit(booth.build_search_url(args)).query)
+            self.assertEqual(params["sort"], [sort])
+            self.assertEqual(params["page"], ["2"])
+        args = booth.build_parser().parse_args(["search", "衣装", "--category", "3D衣装"])
+        params = urllib.parse.parse_qs(urllib.parse.urlsplit(booth.build_search_url(args)).query)
+        self.assertEqual(params["q"], ["衣装"])
 
     def test_zero_result_is_success_but_unknown_structure_is_error(self):
         for page, expected in (("対象商品 0 件", 0), ("broken page", 2)):

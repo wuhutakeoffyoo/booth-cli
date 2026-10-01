@@ -23,6 +23,14 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
 
+## 1.4.0 更新
+
+共享 SQLite 请求预算覆盖同机子进程、重试和重定向；429/503 冷却同步到所有 CLI。缓存命中不消耗出站许可。默认间隔 1 秒；配置 BOOTH_REQUEST_BUDGET_DB 时，所有子进程必须使用同一个本地文件。
+
+智能搜索在有上限的完整详情后评估来源，逐商品返回 relevance_status 与 relevance_evidence。商品名、品类、标签和说明均可作为相关性信息；说明中的关键词提及不保证适配。首轮最多补 6 件详情，二轮补 3 件新商品，默认出站上限 12/18。商品详情传 --desc-len -1 保留正文。
+
+RUN_PROFILE=benchmark 默认关闭 AI，独立账号/配额准备好后才设置 BENCHMARK_ALLOW_AI=true。保留原有行业词表和保守重试；归档翻译函数未启用。详见 ARCHITECTURE.md。
+
 ## 特性
 
 - **智能搜索（VRC 对口，`booth smart`）**：中文/需求式描述直接入口——AI 产出单词级
@@ -145,5 +153,4 @@ Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
 ## 许可证
 
 MIT — 见 [LICENSE](LICENSE)。
-
 
