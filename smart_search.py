@@ -16,6 +16,7 @@ AI 后端为 OpenAI 兼容 chat/completions，环境变量与 vrc-booth-bot 同�
 booth smart 依赖它；缺装时给出明确安装提示）。
 """
 import base64
+import html
 import ipaddress
 import json
 import re
@@ -163,9 +164,22 @@ def build_search_terms(kws: list) -> list:
 # ---------------------------------------------------------------- 描述核实重排
 
 def desc_hit(it: dict, desc_kws: list) -> bool:
-    """商品标题或简介（商品说明）含任一核实词（大小写不敏感子串）。"""
-    hay = ((it.get("name") or "") + "\n" + (it.get("_desc") or "")).lower()
-    return any(str(k).lower() in hay for k in desc_kws if k)
+    """关键词相关度；提及不等于已经确认兼容。"""
+    return description_status(it, desc_kws) in ("mentioned", "title_only")
+
+
+def description_status(it: dict, desc_kws: list) -> str:
+    terms = [str(k).casefold() for k in desc_kws if k]
+    desc = (it.get("_desc") or "").casefold()
+    matching = [s for s in re.split(r"[。！？\n]", desc) if any(k in s for k in terms)]
+    negative = r"対応していません|非対応|未対応|not\s+(?:compatible|supported)|不(?:兼容|支持)"
+    if any(re.search(negative, s) for s in matching):
+        return "unsupported"
+    if matching and it.get("detail_status") != "unavailable":
+        return "mentioned"
+    if any(k in (it.get("name") or "").casefold() for k in terms):
+        return "title_only"
+    return "unknown"
 
 
 def desc_boost(merged: list, title_kws: list, desc_kws: list) -> list:
@@ -312,6 +326,35 @@ def parse_plan(content: str) -> tuple:
     return clean[:8], [], True
 
 
+def validate_evaluation(data: dict, titles: list | None = None) -> dict:
+    """确认至少三件不同候选，引用必须属于本轮提供的候选。"""
+    hits = data.get("hits") or []
+    valid = []
+    for raw in hits if isinstance(hits, list) else []:
+        hit = str(raw).strip()
+        if not hit:
+            continue
+        if titles is not None:
+            m = re.match(r"^#?(\d+)(?:$|[.、:\s])", hit)
+            if m:
+                idx = int(m.group(1))
+                if not 1 <= idx <= len(titles):
+                    continue
+            else:
+                matches = [i for i, title in enumerate(titles, 1)
+                           if hit in re.sub(r"^\d+\.\s*", "", title)]
+                if len(matches) != 1:
+                    continue
+                idx = matches[0]
+            hit = str(idx)
+        if hit not in valid:
+            valid.append(hit)
+    result = dict(data, hits=valid[:6])
+    if result.get("verdict") == "ok" and len(valid) < 3:
+        result.update(verdict="retry", reason="有效命中证据不足三条，未能确认")
+    return result
+
+
 def parse_evaluation(content: str) -> dict:
     """解析评估输出：{verdict, reason, hits, keywords}；解析失败抛 RuntimeError。"""
     m = re.search(r"\{.*\}", content or "", re.S)
@@ -329,8 +372,8 @@ def parse_evaluation(content: str) -> dict:
                            if str(h).strip()]
                           if isinstance(hits, list) else [])
             if verdict in ("ok", "retry"):
-                return {"verdict": verdict, "reason": reason,
-                        "hits": clean_hits[:6], "keywords": clean[:6]}
+                return validate_evaluation({"verdict": verdict, "reason": reason,
+                                            "hits": clean_hits[:6], "keywords": clean[:6]})
         except (json.JSONDecodeError, AttributeError):
             pass
     raise AiError(detail=f"评估输出无法解析: {(content or '')[-160:]}")
@@ -378,7 +421,7 @@ def evaluate_results(query: str, keywords: list, titles: list, *,
         "temperature": 0.2,
         "max_tokens": 2000,
     }
-    return parse_evaluation(_post_chat(url, payload, api_key, timeout))
+    return validate_evaluation(parse_evaluation(_post_chat(url, payload, api_key, timeout)), titles)
 
 
 # ---------------------------------------------------------------- AI 后端
@@ -474,6 +517,14 @@ def guard_api_base(base_url: str) -> str:
     return base_url
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_AUTH_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _post_chat(url: str, payload: dict, api_key: str, timeout: int,
                retries: int = 2) -> str:
     """POST chat/completions，传输类/5xx 错误自动重试，返回回复文本。
@@ -486,7 +537,7 @@ def _post_chat(url: str, payload: dict, api_key: str, timeout: int,
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with _AUTH_OPENER.open(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8", "replace"))
             choice = (data.get("choices") or [{}])[0]
             msg = choice.get("message") or {}
@@ -586,8 +637,6 @@ def recall_products(desc: str, *, base_url: str, api_key: str, model: str,
 # ---------------------------------------------------------------- 网络检索兜底
 
 _WEBFIND_HOSTS = ("html.duckduckgo.com", "api.exa.ai")
-_ITEM_RE = re.compile(r"booth\.pm/(?:[a-z]{2}/)?items/(\d+)")
-_SUB_ITEM_RE = re.compile(r"([a-z0-9-]+)\.booth\.pm/(?:[a-z]{2}/)?items/(\d+)")
 
 
 def _validated_outbound_url(url: str) -> str:
@@ -608,33 +657,47 @@ def item_ids_from_urls(urls: list) -> list:
     """从 URL 列表按出现顺序提取商品 ID（去重）。"""
     ids = []
     for u in urls:
-        m = _ITEM_RE.search(u) or _SUB_ITEM_RE.search(u)
+        try:
+            parts = urllib.parse.urlsplit(u)
+            host = (parts.hostname or "").lower()
+            if (parts.scheme not in ("http", "https") or parts.username or parts.password
+                    or (host != "booth.pm" and not host.endswith(".booth.pm"))):
+                continue
+            m = re.fullmatch(r"/(?:[a-z]{2}/)?items/(\d+)/?", parts.path)
+        except ValueError:
+            continue
         if m:
-            iid = int(m.group(1) if m.lastindex == 1 else m.group(2))
+            iid = int(m.group(1))
             if iid not in ids:
                 ids.append(iid)
     return ids
 
 
-def ids_from_ddg_html(html: str) -> list:
+def ids_from_ddg_html(content: str) -> list:
     """解析 DDG HTML 结果页里的 booth 商品链接。"""
     urls = []
-    for m in re.finditer(r'href="([^"]+)"', html or ""):
-        href = urllib.parse.unquote(m.group(1))
-        if "booth.pm" in href:
-            urls.append(href)
+    for m in re.finditer(r'href="([^"]+)"', content or ""):
+        href = html.unescape(m.group(1))
+        try:
+            parts = urllib.parse.urlsplit(href)
+            host = (parts.hostname or "").lower()
+            if host == "duckduckgo.com" or host.endswith(".duckduckgo.com"):
+                href = urllib.parse.parse_qs(parts.query).get("uddg", [href])[0]
+        except ValueError:
+            continue
+        urls.append(href)
     return item_ids_from_urls(urls)
 
 
 def ddg_find(keywords: str, timeout: int = 15) -> list:
     """DuckDuckGo HTML 检索 <keywords> booth.pm，返回商品 ID 列表（失败返回空）。"""
-    q = urllib.parse.quote(f"{keywords} booth.pm")
+    q = f"{keywords} booth.pm"
     try:
         url = _validated_outbound_url("https://html.duckduckgo.com/html/")
         data = urllib.parse.urlencode({"q": q}).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers={
             "User-Agent": _UA, "Content-Type": "application/x-www-form-urlencoded"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _AUTH_OPENER.open(req, timeout=timeout) as resp:
             return ids_from_ddg_html(resp.read().decode("utf-8", "replace"))
     except Exception:
         return []  # 数据中心 IP 偶被 DDG 挑战，静默降级
@@ -648,7 +711,7 @@ def exa_find(keywords: str, api_key: str, timeout: int = 15) -> list:
                            "includeDomains": ["booth.pm"]}).encode("utf-8")
         req = urllib.request.Request(url, data=body, headers={
             "x-api-key": api_key, "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _AUTH_OPENER.open(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
         return item_ids_from_urls([r.get("url", "") for r in data.get("results", [])])
     except Exception:

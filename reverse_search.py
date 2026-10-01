@@ -69,11 +69,18 @@ def _validated_bing_url(url):
 def _ordered_ids(text):
     """按首次出现顺序提取 booth 商品 ID（含 URL 编码与 JSON 转义形态）。"""
     seen = {}
-    for cand in (text,
-                 text.replace("%2F", "/").replace("%3A", ":"),
-                 text.replace("\\/", "/")):
-        for m in re.finditer(r"items/(\d{4,})", cand):
-            seen.setdefault(int(m.group(1)), None)
+    decoded = urllib.parse.unquote(text or "").replace("\\/", "/")
+    for m in re.finditer(r"https?://[^\s\"'<>\\]+", decoded, re.I):
+        try:
+            parts = urllib.parse.urlsplit(m.group())
+        except ValueError:
+            continue
+        host = (parts.hostname or "").lower()
+        if host != "booth.pm" and not host.endswith(".booth.pm"):
+            continue
+        item = re.fullmatch(r"/(?:[a-z]{2}/)?items/(\d{4,})/?", parts.path)
+        if item and not parts.username and not parts.password:
+            seen.setdefault(int(item.group(1)), None)
     return list(seen)
 
 

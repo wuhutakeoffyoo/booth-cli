@@ -43,7 +43,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -58,6 +58,7 @@ CACHE_PATH = Path.home() / ".booth-cli" / "cache.sqlite3"
 CACHE_TTL_ITEM = 6 * 3600   # 商品 JSON 变化少，缓存 6 小时
 CACHE_TTL_PAGE = 600        # 搜索/商店页要求新鲜度，缓存 10 分钟
 _CACHE_CONN = None          # 惰性初始化；False 表示不可用
+_CACHE_LOCK = threading.RLock()
 _NO_CACHE = False
 
 SORTS = ("new", "popularity", "liked", "price_asc", "price_desc")
@@ -82,10 +83,10 @@ def _polite_wait():
     """保证距上一次出站请求至少 MIN_REQUEST_INTERVAL 秒（线程安全）。"""
     global _LAST_REQ_TS
     with _REQ_LOCK:
-        wait = MIN_REQUEST_INTERVAL - (time.time() - _LAST_REQ_TS)
+        wait = MIN_REQUEST_INTERVAL - (time.monotonic() - _LAST_REQ_TS)
         if wait > 0:
             time.sleep(wait)
-        _LAST_REQ_TS = time.time()
+        _LAST_REQ_TS = time.monotonic()
 
 
 class BoothError(Exception):
@@ -118,10 +119,16 @@ def set_cache_enabled(enabled):
 def _cache():
     """惰性打开 sqlite 缓存；不可用时返回 None（降级为无缓存）。"""
     global _CACHE_CONN
+    with _CACHE_LOCK:
+        return _open_cache()
+
+
+def _open_cache():
+    global _CACHE_CONN
     if _CACHE_CONN is None:
         try:
             CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(CACHE_PATH), timeout=2)
+            conn = sqlite3.connect(str(CACHE_PATH), timeout=2, check_same_thread=False)
             conn.execute("CREATE TABLE IF NOT EXISTS cache "
                          "(key TEXT PRIMARY KEY, ts REAL, body BLOB, final_url TEXT)")
             conn.execute("DELETE FROM cache WHERE ts < ?", (time.time() - 7 * 24 * 3600,))
@@ -139,8 +146,9 @@ def cache_get(url, ttl):
     if not conn:
         return None
     try:
-        row = conn.execute("SELECT ts, body, final_url FROM cache WHERE key = ?",
-                           (url,)).fetchone()
+        with _CACHE_LOCK:
+            row = conn.execute("SELECT ts, body, final_url FROM cache WHERE key = ?",
+                               (url,)).fetchone()
     except sqlite3.Error:
         return None
     if not row or time.time() - row[0] > ttl:
@@ -155,9 +163,10 @@ def cache_put(url, body, final_url):
     if not conn:
         return
     try:
-        conn.execute("INSERT OR REPLACE INTO cache (key, ts, body, final_url) VALUES (?,?,?,?)",
-                     (url, time.time(), body, final_url))
-        conn.commit()
+        with _CACHE_LOCK:
+            conn.execute("INSERT OR REPLACE INTO cache (key, ts, body, final_url) VALUES (?,?,?,?)",
+                         (url, time.time(), body, final_url))
+            conn.commit()
     except sqlite3.Error:
         pass
 
@@ -189,8 +198,6 @@ def http_get(url, *, json_accept=False, csrf=None, cache_ttl=0):
     cached = cache_get(url, cache_ttl)
     if cached is not None:
         return cached[0], cached[1], 200
-    _polite_wait()
-
     headers = {
         "User-Agent": UA,
         "Accept": "application/json" if json_accept else "text/html,application/xhtml+xml,*/*;q=0.8",
@@ -210,6 +217,7 @@ def http_get(url, *, json_accept=False, csrf=None, cache_ttl=0):
         for _hop in range(MAX_REDIRECTS):
             try:
                 req = urllib.request.Request(current, headers=headers)
+                _polite_wait()
                 with _OPENER.open(req, timeout=30) as resp:
                     data = resp.read()
                     if resp.headers.get("Content-Encoding") == "gzip":
@@ -413,6 +421,7 @@ def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
             "url": shop.get("url"),
         },
         "is_adult": raw.get("is_adult"),
+        "is_vrchat": raw.get("is_vrchat"),
         "is_sold_out": raw.get("is_sold_out"),
         "is_end_of_sale": raw.get("is_end_of_sale"),
         "wish_lists_count": raw.get("wish_lists_count"),
@@ -508,22 +517,27 @@ def effective_sort(sort: str, page: int) -> tuple:
 
 
 def cmd_search(args):
-    sort, sort_note = effective_sort(args.sort, args.page)
+    start_page = args.page
+    sort, sort_note = effective_sort(args.sort, max(start_page, 2) if args.pages > 1 else start_page)
     args.sort = sort
     items, total, has_next = [], None, False
+    seen = set()
     fetched = 0
     for offset in range(args.pages):
-        args.page = args.page + offset
+        args.page = start_page + offset
         url = build_search_url(args)
         page_html, final_url = get_html(url)
         result = parse_search_page(page_html)
-        if not result["items"] and "item-card" not in page_html:
+        if not result["items"] and result["total"] != 0 and "item-card" not in page_html:
             raise BoothError(f"搜索页无结果或结构异常: {final_url}（语言 {args.lang} 可能不渲染列表，试试 --lang ja）")
         if total is None:
             total = result["total"]
         has_next = result["has_next"]
         fetched += 1
-        items.extend(result["items"])
+        for item in result["items"]:
+            if item["id"] not in seen:
+                seen.add(item["id"])
+                items.append(item)
         if len(items) >= args.limit:
             break
         if not has_next:
@@ -560,7 +574,7 @@ def cmd_item(args):
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
-    it = payload
+    it = trim_item(raw, desc_len=len(clean_text(raw.get("description")))) if args.full else payload
     print(f"#{it['id']}  {it['price']}  {it['shop'].get('name') or ''}({it['shop'].get('subdomain') or ''})")
     print(f"标题: {it['name']}")
     flags = []
@@ -702,15 +716,29 @@ def _enrich_details(entries, desc_len=DEFAULT_DESC_LEN):
         try:
             detail = trim_item(fetch_item(str(it["id"]), "ja"), desc_len=desc_len)
         except BoothError:
+            it["detail_status"] = "unavailable"
             return
         for k in ("wish_lists_count", "tags", "published_at"):
             if detail.get(k):
                 it[k] = detail[k]
         it["_desc"] = detail.get("description") or ""
+        it["detail_status"] = "available"
 
     with ThreadPoolExecutor(max_workers=_SMART_WORKERS) as pool:
         list(pool.map(_one, entries))
 
+
+def item_matches_policy(item, adult="include", tag=None):
+    """详情筛选：未知字段不作为要求已满足的证据。"""
+    if adult == "exclude" and item.get("is_adult") is not False:
+        return False
+    if adult == "only" and item.get("is_adult") is not True:
+        return False
+    if tag:
+        tags = [t.get("name") if isinstance(t, dict) else t for t in item.get("tags") or []]
+        if not any(str(t).casefold() == tag.casefold() for t in tags if t):
+            return tag.casefold() == "vrchat" and item.get("is_vrchat") is True
+    return True
 
 def cmd_smart(args):
     import smart_search
@@ -780,6 +808,7 @@ def cmd_smart(args):
                       for i, it in enumerate(merged[:12], 1)]
             ev = smart_search.evaluate_results(query, kws_ai or used_terms,
                                                titles, **backend)
+            ev = smart_search.validate_evaluation(ev, titles)
             print(f"[eval] 第一轮: {ev.get('verdict')} {ev.get('reason')}",
                   file=sys.stderr)
             # 保守 retry：评估员放行但标题命中率过低时仍触发二轮
@@ -816,6 +845,7 @@ def cmd_smart(args):
                                        for i, it in enumerate(merged[:12], 1)]
                             ev2 = smart_search.evaluate_results(query, terms2,
                                                                 titles2, **backend)
+                            ev2 = smart_search.validate_evaluation(ev2, titles2)
                             eval_note = ("第二轮结果已按需求确认"
                                          if ev2.get("verdict") == "ok" else
                                          "两轮搜索后仍未完全确认，以下为最接近的结果")
@@ -837,6 +867,10 @@ def cmd_smart(args):
                 try:
                     it = trim_item(fetch_item(str(iid), "ja"), desc_len=200)
                 except BoothError:
+                    continue
+                required_tags = list(getattr(args, "tag", None) or []) + (["VRChat"] if args.vrc else [])
+                if not item_matches_policy(it, args.adult) or any(
+                        not item_matches_policy(it, "include", tag) for tag in required_tags):
                     continue
                 it["via"] = "网络检索"
                 merged.append(it)
@@ -862,9 +896,9 @@ def cmd_smart(args):
     if desc_kws:
         _enrich_details(merged[:_SMART_DETAIL_POOL], desc_len=_SMART_DETAIL_DESC_LEN)
         merged = smart_search.desc_boost(merged, terms + kws_ai, desc_kws)
-        n_hit = sum(1 for it in merged if smart_search.desc_hit(it, desc_kws))
-        desc_note = (f"已按商品说明核实「{' / '.join(desc_kws[:2])}」:{n_hit} 件命中"
-                     if n_hit else "商品说明里未核实到对应信息，按标题相关度展示")
+        n_hit = sum(1 for it in merged if smart_search.description_status(it, desc_kws) == "mentioned")
+        desc_note = (f"商品说明中提及「{' / '.join(desc_kws[:2])}」:{n_hit} 件（未确认兼容性）"
+                     if n_hit else "商品说明未提供可确认的兼容性证据，按关键词相关度展示")
     else:
         _enrich_details(merged[:args.limit])
 
@@ -874,7 +908,7 @@ def cmd_smart(args):
     if args.json:
         print(json.dumps({
             "query": query, "mode": mode, "ai_keywords": kws_ai,
-            "keywords": terms,
+            "keywords": used_terms,
             "desc_keywords": desc_kws, "desc_note": desc_note,
             "eval_note": eval_note or None,
             "sort_note": sort_note or None, "ai_note": ai_note or None,
@@ -910,16 +944,29 @@ def cmd_imgsearch(args):
     tmp_path = None
     if re.match(r"^https?://", src, re.I):
         data = download_image(src)
-        tf = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-        tf.write(data)
-        tf.close()
-        path = tf.name
-        tmp_path = tf.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tf:
+            tmp_path = tf.name
+            try:
+                tf.write(data)
+            except Exception:
+                tf.close()
+                os.unlink(tmp_path)
+                raise
+        path = tmp_path
     else:
         path = src.strip('"')
         if not Path(path).is_file():
             raise BoothError(f"本地图片不存在: {path}（也支持 booth 官方图床的图片 URL）")
 
+    try:
+        _run_imgsearch(args, path, src)
+    finally:
+        if tmp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+
+def _run_imgsearch(args, path, src):
     engines = [e.strip() for e in args.engine.split(",") if e.strip()]
     ordered, via, derived = [], {}, ""
     for eng in engines:
@@ -1014,12 +1061,6 @@ def cmd_imgsearch(args):
         matches.append(m)
         time.sleep(1.0)
 
-    if tmp_path:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-
     payload = {"image": src, "engines": engines, "derived_query": derived,
                "match_count": len(matches), "matches": matches}
     if args.json:
@@ -1106,7 +1147,12 @@ def cmd_bot(args):
         try:
             with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
                 ns = build_parser().parse_args(argv)
-                ns.func(ns)
+                previous_cache = _NO_CACHE
+                try:
+                    set_cache_enabled(not getattr(ns, "no_cache", False))
+                    ns.func(ns)
+                finally:
+                    set_cache_enabled(not previous_cache)
         except SystemExit as e:  # argparse 用法错误
             exit_code = e.code or 0
         if exit_code:

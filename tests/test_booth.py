@@ -131,7 +131,7 @@ class TestParsers(unittest.TestCase):
 
 class TestReverseSearch(unittest.TestCase):
     def test_ordered_ids_order_and_escapes(self):
-        text = ("https://booth.pm/ja/items/3368697 ... %2Fitems%2F555001 ... "
+        text = ("https://booth.pm/ja/items/3368697 ... https%3A%2F%2Fbooth.pm%2Fitems%2F555001 ... "
                 'https:\/\/shop.booth.pm\/ja\/items\/1000001')
         self.assertEqual(reverse_search._ordered_ids(text), [3368697, 555001, 1000001])
 
