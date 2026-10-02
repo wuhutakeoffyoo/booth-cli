@@ -13,12 +13,12 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
 - **小语种翻译不裸翻**：LLM 直译日语不可靠——借鉴 E 站（E-Hentai）AI 翻译本子类
   开源实践，以术语约束与写法规范驾驭模型：单词级关键词（Booth 多词 AND 匹配脆弱）、
   专有名词片假名完整转写、部位/用途行业词、假名读音与连写变体。
-- **按商品说明文核实兼容性**：「适用于XX素体的服装」这类需求的答案写在商品说明
-  （対応素体/仕様 段落）而非标题——自动拉取详情按说明文匹配置顶，并如实标注核实结果。
-- **盲测驱动的自迭代**：每条链路盲抽 100 个 VRC 对口样本，目标准确率 ≥90%，
+- **按商品说明提供适配证据**：「适用于XX素体的服装」类需求结合商品说明
+  （対応素体/仕様 段落）排序，逐商品标注原文依据或未核实状态，实际适配仍以商品说明为准。
+- **历史盲测记录**：每条链路盲抽 100 个 VRC 对口样本，目标准确率 ≥90%，
   跑测→改策略→复测。图文链路一测约 50% 撞上「艺术字干扰视觉 OCR」的瓶颈，
   接入 Exa 网络搜索与 LLM 自有知识库（知名模型/热门素材回忆）后二测突破到
-  **93%**（JP 95% / ZH 100%）。
+  **93%**（JP 95% / ZH 100%）。这些历史结果未在当前版本复测；本轮验证见下文。
 - **每一层都有退路**：图搜引擎三级回落（Bing 纯 HTTP → 浏览器 → ascii2d → 派生词直搜）、
   `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
@@ -30,6 +30,66 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
 智能搜索在有上限的完整详情后评估来源，逐商品返回 relevance_status 与 relevance_evidence。商品名、品类、标签和说明均可作为相关性信息；说明中的关键词提及不保证适配。首轮最多补 6 件详情，二轮补 3 件新商品，默认出站上限 12/18。商品详情传 --desc-len -1 保留正文。
 
 RUN_PROFILE=benchmark 默认关闭 AI，独立账号/配额准备好后才设置 BENCHMARK_ALLOW_AI=true。保留原有行业词表和保守重试；归档翻译函数未启用。详见 ARCHITECTURE.md。
+
+## 创新点与实现原理
+
+本项目的设计重点，是把 BOOTH 检索、跨语言术语、商品原文证据和请求成本控制组合成可供 AI agent 调用的流程。下面描述的是已经实现的机制。
+
+```mermaid
+flowchart TD
+    A["需求或关键词"] --> B["AI 规划或原词检索"]
+    B --> C["术语与读音变体：单词级检索"]
+    C --> D["按商品 ID 合并、去重与排序"]
+    D --> E["有限获取完整详情并复用"]
+    E --> F["AI 可用时评估并校验原文引用"]
+    F --> G{"需要且能进行二轮？"}
+    G -->|"是"| H["最多一次二轮：新词检索与再评估"]
+    G -->|"否"| I["逐商品输出状态、依据与降级说明"]
+    H --> I
+    J["共享间隔、冷却、预算与截止时间"] -.-> C
+    J -.-> E
+    J -.-> H
+```
+
+### 1. 需求规划与行业词共同约束检索
+
+AI 先决定是否翻译，并分别给出站内检索词与商品说明核实词；随后用固定行业词表、复合需求中的正向术语和 pykakasi 读音变体补齐日语表记。不同词分别检索，再按商品 ID 合并，减少把整句翻译成一个脆弱 AND 查询的问题。没有 AI 时使用原词分词和读音变体。二轮沿用相同归一流程，去掉已搜词，只保留最多三个新词。
+
+实现入口：[smart_search.py](smart_search.py) 的 `plan_search`、`apply_industry_synonyms`、`expand_reading_variants`，以及 [booth.py](booth.py) 的 `cmd_smart`、`_merged_search`。
+
+### 2. 把相关性判断绑定到商品原文
+
+评估前最多为首轮六件商品补完整详情，二轮最多补三件新商品；保留未拉详情的候选，并记录 `detail_status`。评估输入含完整商品名、品类、标签、商品 ID、来源摘要哈希，以及最多 900 字符的说明摘录。摘录优先取核实词附近的段落，无命中时取正文首尾；完整说明留在本地供引用和否定条件检查。
+
+模型的 `item_id + field + quote` 必须对应同一商品字段中的连续原文。带说明核实词的需求要求引用可用的 description；明确否定会阻止其作为支持证据。只有至少三条具有有效引用的命中，评估才可维持 `ok`，其余商品仍各自标为 `related / unsupported / unknown`。这能验证引用来源，相关性语义仍由模型判断，不能把关键词提及当作兼容性保证。
+
+实现：[search_evidence.py](search_evidence.py) 的 `candidate_lines`、`grounded_evaluation`、`promote_evidence`；JSON 结果提供 `relevance_status` 与 `relevance_evidence`，供上层继续核查。
+
+### 3. 一个查询的预算贯穿多个子进程
+
+Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 CLI 进程为经 `http_get` 发出的 BOOTH 请求共用同一 SQLite 文件，以短暂的 `BEGIN IMMEDIATE` 事务核对请求间隔、共享冷却和剩余预算，并原子登记一次出站许可；事务外等待和联网，避免睡眠期间占住数据库写锁。
+
+重试、重定向和详情请求都计入许可，HTTP 缓存命中不计入。默认请求间隔为 1 秒；独立 smart 查询默认首轮 12 次，二轮最多 18 次，扩展时保留已消耗计数及原截止时间。429/503 的有效 `Retry-After` 保存为同机共享冷却，超出可等待时间就明确返回。数据库不可用时返回错误，不绕过限制。
+
+实现：[request_budget.py](request_budget.py) 的 `wait`、`cooldown`、`query_context`，接入 [booth.py](booth.py) 的 `http_get`。独立 smart 的默认 180 秒约束出站等待与许可；Bot 另负责完整任务的总超时。同机各进程须共用 `BOOTH_REQUEST_BUDGET_DB`，该机制不提供跨机器限流。
+
+### 4. 从已有页面取候选，减少无效网络工作
+
+规范搜索 URL 在查询已位于路径时不再重复传 q，显式传递新着等排序；人气排序翻页由 `effective_sort` 切到新着并说明。保留同页候选，标题命中用于排序而不作为删除依据；详情通过状态标记复用，展示阶段不再重复获取。
+
+实现：[booth.py](booth.py) 的 `build_search_url`、`effective_sort`、`_enrich_details`。这类优化减少重定向和重复详情请求，并不增加自动抓取页数。
+
+### 5. 结构化接口与可追踪的降级
+
+`booth bot` 使用 `ok / action / data / error` 信封，并可附 `request_budget`；版本接口返回能力与语义指纹，让框架能校验母项目版本并识别业务源码变化。已知 GLM 文本模型通过 `structured_options` 设置 JSON 输出及相应推理参数，其他模型维持已有参数。仅配置备用 AI 也可工作，评估失败时保留候选和未核实状态。
+
+实现：[booth.py](booth.py) 的 `cmd_bot`，接口约定见 [QQBOT.md](QQBOT.md)；AI 配置选择在 [smart_search.py](smart_search.py)，结构化参数在 [search_evidence.py](search_evidence.py)。
+
+### 验证记录与适用范围
+
+2026-10-01 的 1.4.0 / Bot 0.2.0 配套验收：CLI 单元测试 103 项、Bot 单元测试 113 项、母项目契约测试 4 项，共 220 项通过；两仓库 Python 3.10 / 3.12 CI 通过。CLI 的并发预算测试使用真实子进程，见 [test_request_budget.py](tests/test_request_budget.py)；引用与否定条件测试见 [test_search_evidence.py](tests/test_search_evidence.py)。
+
+线上内部“铃铛”查询单次耗时 19.9 秒，使用 12 个 BOOTH 请求，展示六件商品，其中三件有有效来源引用、三件未核实。该次验收没有人工发送 QQ 消息；本地三条抽查含已有 HTTP 缓存。它们不构成冷启动性能或整体准确率评测，历史 93% 记录未在这一版本重新证明。大规模评测应使用独立账号/配额；`RUN_PROFILE=benchmark` 默认禁止 AI，更换同账号 key 不等于配额隔离。
 
 ## 特性
 
@@ -153,4 +213,3 @@ Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
 ## 许可证
 
 MIT — 见 [LICENSE](LICENSE)。
-
