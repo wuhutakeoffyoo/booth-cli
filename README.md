@@ -183,6 +183,8 @@ booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 
 `search`、`shop` 和精简 `item --json` 的商品数据提供 `thumbnail`：搜索／商店保留页面返回的缩略图 URL，详情优先使用 `resized`，缺少时保留 `original`。该字段不改写尺寸路径或 `_base_resized` 文件名；无图片时为 `null`，供其他工作流按需展示。既有 `image`／`images` 字段保持原有语义。
 
+精简 `item --json` 同时提供 `original_images`，保留商品详情返回的原图 URL，不通过删除缩略图路径或文件名后缀猜测地址。需要清晰大图时可按需读取详情，再使用[原图下载后端](docs/image_download.md)：限制并发、缓存已取得的图片，原图超时后回退到缩略图，并返回实际来源与耗时；界面可自行显示加载动画。
+
 商品规格名称优先拼接 `field1` 至 `field6`，缺失时使用接口返回的 `name`；名称是作者提供的数据，不代表已验证适配。
 
 ## 已知限制

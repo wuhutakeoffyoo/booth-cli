@@ -155,6 +155,7 @@ class TestThumbnailMetadata(unittest.TestCase):
         before = copy.deepcopy(raw)
         item = booth.trim_item(raw)
         self.assertEqual(item["thumbnail"], THUMBNAIL)
+        self.assertEqual(item["original_images"], [original])
         self.assertEqual(item["images"], [
             "https://booth.pximg.net/12345678/original.png",
             "https://booth.pximg.net/c/1200x1200/second.jpg",
@@ -177,6 +178,7 @@ class TestThumbnailMetadata(unittest.TestCase):
                 item = booth.trim_item(raw)
                 self.assertIsNone(item["thumbnail"])
                 self.assertEqual(item["images"], [])
+                self.assertEqual(item["original_images"], [])
 
     def test_detail_empty_image_does_not_hide_later_thumbnail(self):
         item = booth.trim_item({"images": [{"original": ""}, {"resized": THUMBNAIL}]})

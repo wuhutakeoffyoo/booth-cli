@@ -459,8 +459,11 @@ def fetch_item(item_id, lang="ja"):
 
 def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
     images = []
+    original_images = []
     thumbnail = None
     for img in raw.get("images") or []:
+        if (img or {}).get("original"):
+            original_images.append(img["original"])
         if thumbnail is None:
             thumbnail = (img or {}).get("resized") or (img or {}).get("original") or None
         u = (img or {}).get("original") or (img or {}).get("resized")
@@ -495,6 +498,7 @@ def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
         "category": cat.get("name") if isinstance(cat, dict) else cat,
         "tags": [t.get("name") for t in raw.get("tags") or []],
         "images": images,
+        "original_images": original_images,
         "thumbnail": thumbnail,
         "variations": variations,
         "description": (clean_text(raw.get("description")) if desc_len is None or desc_len < 0
