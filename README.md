@@ -179,6 +179,12 @@ booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 | `--page N` / `--pages N` / `--limit N` | 翻页与条数（页间隔约 1.2s） |
 | `--json` | 结构化 JSON 输出（AI 推荐） |
 
+### 商品图片与规格元数据
+
+`search`、`shop` 和精简 `item --json` 的商品数据提供 `thumbnail`：搜索／商店保留页面返回的缩略图 URL，详情优先使用 `resized`，缺少时保留 `original`。该字段不改写尺寸路径或 `_base_resized` 文件名；无图片时为 `null`，供其他工作流按需展示。既有 `image`／`images` 字段保持原有语义。
+
+商品规格名称优先拼接 `field1` 至 `field6`，缺失时使用接口返回的 `name`；名称是作者提供的数据，不代表已验证适配。
+
 ## 已知限制
 
 - **无官方 API**，依赖页面结构，Booth 改版可能需要更新解析器。

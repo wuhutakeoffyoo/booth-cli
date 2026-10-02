@@ -28,6 +28,7 @@ import contextlib
 import email.utils
 import gzip
 import html as html_mod
+from html.parser import HTMLParser
 import io
 import json
 import random
@@ -347,13 +348,61 @@ def parse_shop_subdomain(s):
 ATTR_RE = re.compile(r'data-(product-id|product-brand|product-price|product-category|product-event)="([^"]*)"')
 
 
+class _SearchPaginationParser(HTMLParser):
+    """Recognize usable next-page links in both BOOTH pagination layouts."""
+
+    _VOID = frozenset("area base br col embed hr img input link meta param source track wbr".split())
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.has_next = False
+        self._stack = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        classes = (attrs.get("class") or "").split()
+        disabled = (bool(self._stack and self._stack[-1][1])
+                    or "disabled" in attrs
+                    or (attrs.get("aria-disabled") or "").lower() == "true"
+                    or bool({"disabled", "is-disabled"}.intersection(classes)))
+        href = (attrs.get("href") or "").strip()
+        usable = bool(href and not href.startswith("#") and not disabled)
+        if tag in ("a", "link") and usable and "next" in (attrs.get("rel") or "").lower().split():
+            self.has_next = True
+        if tag == "i" and "icon-arrow-open-right" in classes and not disabled:
+            anchor = next((frame for frame in reversed(self._stack) if frame[0] == "a"), None)
+            if anchor and anchor[2]:
+                try:
+                    parts = urllib.parse.urlsplit(anchor[2])
+                    pages = urllib.parse.parse_qs(parts.query).get("page", [])
+                    if parts.scheme in ("", "https", "http") and any(p.isdigit() and int(p) > 0 for p in pages):
+                        self.has_next = True
+                except ValueError:
+                    pass
+        if tag not in self._VOID:
+            self._stack.append((tag, disabled, href if tag == "a" and usable else None))
+
+    def handle_endtag(self, tag):
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == tag:
+                del self._stack[index:]
+                break
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in self._VOID:
+            self.handle_endtag(tag)
+
+
 def parse_search_page(page_html):
     """从搜索结果 HTML 提取商品卡片与元信息。"""
     total = None
     m = re.search(r"対象商品\s*([\d,]+)\s*件", page_html)
     if m:
         total = int(m.group(1).replace(",", ""))
-    has_next = 'rel="next"' in page_html
+    pagination = _SearchPaginationParser()
+    pagination.feed(page_html)
+    has_next = pagination.has_next
 
     items = []
     for chunk in re.split(r'<li class="item-card[\s"]', page_html)[1:]:
@@ -390,6 +439,7 @@ def parse_search_page(page_html):
             "tags": tags,
             "is_adult": is_adult,
             "image": original_image(unescape(img_m.group(1))) if img_m else None,
+            "thumbnail": unescape(img_m.group(1)) if img_m else None,
         })
     return {"total": total, "items": items, "has_next": has_next}
 
@@ -409,7 +459,10 @@ def fetch_item(item_id, lang="ja"):
 
 def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
     images = []
+    thumbnail = None
     for img in raw.get("images") or []:
+        if thumbnail is None:
+            thumbnail = (img or {}).get("resized") or (img or {}).get("original") or None
         u = (img or {}).get("original") or (img or {}).get("resized")
         if u:
             images.append(u.replace("_base_resized", ""))
@@ -417,7 +470,7 @@ def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
     for v in raw.get("variations") or []:
         name = " / ".join(str(v.get(f"field{i}")) for i in range(1, 7)
                           if v.get(f"field{i}"))
-        variations.append({"name": name or None,
+        variations.append({"name": name or v.get("name") or None,
                            "price": v.get("price"),
                            "status": v.get("status") or
                                      ("end_of_sale" if v.get("is_end_of_sale") else None)})
@@ -442,6 +495,7 @@ def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
         "category": cat.get("name") if isinstance(cat, dict) else cat,
         "tags": [t.get("name") for t in raw.get("tags") or []],
         "images": images,
+        "thumbnail": thumbnail,
         "variations": variations,
         "description": (clean_text(raw.get("description")) if desc_len is None or desc_len < 0
                         else clean_text(raw.get("description"))[:desc_len]) or None,
@@ -458,8 +512,7 @@ def parse_shop_page(page_html):
         except json.JSONDecodeError:
             continue
         shop = raw.get("shop") or {}
-        thumbs = [u.replace("_base_resized", "") for u in
-                  (raw.get("thumbnail_image_urls") or [])]
+        thumbs = raw.get("thumbnail_image_urls") or []
         items.append({
             "id": raw.get("id"),
             "name": raw.get("name"),
@@ -470,6 +523,7 @@ def parse_shop_page(page_html):
             "is_sold_out": raw.get("is_sold_out"),
             "is_vrchat": raw.get("is_vrchat"),
             "image": original_image(thumbs[0]) if thumbs else None,
+            "thumbnail": thumbs[0] if thumbs else None,
         })
     return items
 
