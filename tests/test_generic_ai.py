@@ -20,7 +20,8 @@ class TestGenericCli(unittest.TestCase):
 
     def test_new_two_field_config_and_legacy_aliases(self):
         self.assertIsNone(smart.ai_backend())
-        with mock.patch.dict(os.environ, {"AI_API_KEY":"new", "AI_BASE_URL":"https://new.invalid/v1"}):
+        with mock.patch.dict(os.environ, {"AI_API_KEY":"new", "AI_BASE_URL":"https://new.invalid/v1",
+                                          "VISION_MODEL":"stale-provider-model"}):
             self.assertEqual(smart.ai_backend()["model"], "")
         with mock.patch.dict(os.environ, {"VISION_API_KEY":"old", "VISION_BASE_URL":"https://old.invalid/v1",
                                           "VISION_MODEL":"old-model", "AI_API_KEY":"", "AI_BASE_URL":""}):

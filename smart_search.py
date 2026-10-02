@@ -496,10 +496,12 @@ def ai_backend():
     key = (os.environ.get("AI_API_KEY") or os.environ.get("VISION_API_KEY", "")).strip()
     if not key:
         return ai_fallback_backend()
+    new_connection = bool(os.environ.get("AI_API_KEY") and os.environ.get("AI_BASE_URL"))
     return {
         "base_url": (os.environ.get("AI_BASE_URL") or os.environ.get("VISION_BASE_URL", "")).strip(),
         "api_key": key,
-        "model": (os.environ.get("AI_MODEL") or os.environ.get("VISION_MODEL", "")).strip(),
+        "model": (os.environ.get("AI_MODEL", "") if new_connection else
+                  os.environ.get("AI_MODEL") or os.environ.get("VISION_MODEL", "")).strip(),
         "timeout": int(os.environ.get("VISION_TIMEOUT", "60") or 60),
     }
 

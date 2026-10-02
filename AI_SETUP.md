@@ -17,7 +17,7 @@ EXA_BASE_URL=https://api.exa.ai
 
 只填写 key 和 URL 时，代码读取 `/models`：优先服务声明的默认模型，其次声明支持图片的模型，否则使用首个文本生成模型。模型列表在内存缓存 10 分钟。接口不提供模型列表或账号没有列表权限时，补填 `AI_MODEL`；也可用它固定所需模型，避免列表顺序变化。不会默认使用某家免费模型。
 
-已有 `VISION_API_KEY / VISION_BASE_URL / VISION_MODEL` 继续有效；非空的新变量优先。备用服务可填写 `AI_FALLBACK_API_KEY / AI_FALLBACK_BASE_URL`，可选 `AI_FALLBACK_MODEL`。默认 API 模式失败时不自动启动本机 AI CLI；`AI_MODE=cli` 只供明确配置的旧文字模式使用。
+已有 `VISION_API_KEY / VISION_BASE_URL / VISION_MODEL` 继续有效；非空的新变量优先。同时填写新的 `AI_API_KEY + AI_BASE_URL` 时，省略或留空 `AI_MODEL` 就自动发现模型，不继承旧服务的 `VISION_MODEL`；需要固定模型时显式填写新的 `AI_MODEL`。备用服务可填写 `AI_FALLBACK_API_KEY / AI_FALLBACK_BASE_URL`，可选 `AI_FALLBACK_MODEL`。默认 API 模式失败时不自动启动本机 AI CLI；`AI_MODE=cli` 只供明确配置的旧文字模式使用。
 
 ## 支持的接口协议
 
