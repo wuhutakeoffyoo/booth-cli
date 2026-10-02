@@ -1,5 +1,5 @@
 """为 100 样本生成中文用户模拟查询（glm-5.3-flash，Go 端点）。
-在 SG 服务器运行：读取 ~/blind100/truth.json，写回 zh_query 字段。"""
+在海外服务器运行：读取 ~/blind100/truth.json，写回 zh_query 字段。"""
 import asyncio
 import json
 import re

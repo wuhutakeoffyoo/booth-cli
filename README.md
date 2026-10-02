@@ -19,6 +19,7 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   跑测→改策略→复测。图文链路一测约 50% 撞上「艺术字干扰视觉 OCR」的瓶颈，
   接入 Exa 网络搜索与 LLM 自有知识库（知名模型/热门素材回忆）后二测突破到
   **93%**（JP 95% / ZH 100%）。这些历史结果未在当前版本复测；本轮验证见下文。
+  中文泛称查询的多轮盲测记录（方法/词表/逐轮结果/证据）见 [benchmarks/](benchmarks/)。
 - **每一层都有退路**：图搜引擎三级回落（Bing 纯 HTTP → 浏览器 → ascii2d → 派生词直搜）、
   `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
@@ -196,6 +197,32 @@ booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 
 Python 3.8+；安装依赖：`pip install -r requirements.txt`（pykakasi，假名读音变体，必装）。
 Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
+
+## 部署与网络
+
+CLI 是纯本地程序，部署在哪台机器都可以，关键是**网络能访问 booth.pm 与官方图床 pximg**——这两个域名在部分网络环境（如中国大陆）直连不可达或不稳定。
+
+### 方式一：本地部署（推荐起步）
+
+1. 安装 Python 3.8+ 与依赖：`pip install -r requirements.txt`；
+2. 把本目录加入 PATH（或建 `booth` 别名指向 `booth.py`），运行 `booth search "猫耳" --json` 验证；
+3. 网络不通时按下面的代理引导配置。
+
+**Clash 代理引导（本地部署重点）**：
+
+- 建议开启 **TUN 模式**（虚拟网卡全局接管）：CLI 以命令行子进程方式发起请求，
+  不读取浏览器代理设置；TUN 模式在网络层接管全部流量，确保 python 子进程也走代理。
+- 同时在规则（或全局规则组）中让以下域名走代理节点（建议日本等亚洲出口，
+  延迟最低且 Bing 图搜快路径可用）：`booth.pm`、`booth.pximg.net`、`www.bing.com`（图搜）、
+  `html.duckduckgo.com`（网络检索兜底）；`api.exa.ai` 与 AI 端点（`opencode.ai`/`open.bigmodel.cn` 等）直连或代理均可。
+- 不使用 TUN 时，也可设置环境变量兜底：`HTTPS_PROXY=http://127.0.0.1:7890`
+  （端口按你的 Clash 混合端口调整）——CLI 的网络层会读取该变量。
+
+### 方式二：服务器部署
+
+- **必须选择海外服务器**（日本等亚洲区域最佳）：booth.pm 与 pximg 需要海外直连，
+  国内服务器上 pximg 不可达、Bing 图搜快路径会被弹回；海外服务器实测全链路免浏览器、秒级响应。
+- 部署步骤、QQ bot 组网（协议端留国内 + 反向 WS）与历史实测记录见 [PROXY_DEPLOYMENT.md](PROXY_DEPLOYMENT.md)。
 
 ## AI Agent 技能文档
 

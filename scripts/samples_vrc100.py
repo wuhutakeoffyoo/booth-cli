@@ -1,4 +1,4 @@
-"""VRC 对口 100 样本取样（在 SG 服务器运行）：
+"""VRC 对口 100 样本取样（在海外服务器运行）：
 搜索 q=VRChat 的随机页抽取 VRChat 商品，规则化 jp_query，下载官方图。
 输出 ~/vblind100/truth.json 与 images/。"""
 import json

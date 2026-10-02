@@ -180,7 +180,7 @@ _BING_BOUNCE_RE = re.compile(r"FORM=(?:SBIRDI|SBIHMP)")
 def bing_search_http(image_path):
     """Bing 视觉搜索·纯 HTTP 快路径，返回 (item_ids有序, derived_query, final_url)。
 
-    实测协议（2026-09-27，SG 出口验证）：
+    实测协议（2026-09-27，海外出口验证）：
     Step1 multipart 上传 base64 图片，从 302 Location 提取 bcid；
     Step2 手动跟随 detailV2 的重定向链（宽松地区会 302 到 /search?q=<派生词> 的
           结果页）。派生词就是 Bing 读出的图内文字，与 playwright 流程等价；
@@ -188,7 +188,7 @@ def bing_search_http(image_path):
           由调用方用派生词走关键词搜索兜底。
     受限网络（弹回 FORM=SBIRDI/SBIHMP 首页）时抛错，由调用方回落 playwright。
     knowledge API 路线已验证不可行：无 X-Image-Knowledge-Signature 恒返回空壳，
-    而签名只存在于 JS 渲染页面，纯 HTTP 拿不到（本机与 SG 双重实测）。
+    而签名只存在于 JS 渲染页面，纯 HTTP 拿不到（海外出口验证）。
     """
     bcid, loc = _bing_upload(image_path)
     result_url = f"https://www.bing.com/images/search?insightsToken={bcid}"

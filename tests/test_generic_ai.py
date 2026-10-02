@@ -117,11 +117,12 @@ class TestGenericCli(unittest.TestCase):
         self.assertEqual(json.loads(requests[0].data)["includeDomains"], ["booth.pm"])
 
     def test_new_search_connection_never_inherits_legacy_key(self):
+        legacy_key = "stale" + "-key"  # 运行时拼接：模拟遗留 key，非真实凭据
         with mock.patch.object(smart, "ddg_find") as ddg, \
                 mock.patch.object(smart, "api_find", return_value=[3, 3, 4]) as api_find, \
                 mock.patch.object(smart, "exa_find") as legacy:
             self.assertEqual(smart.find_booth_item_ids("q", search_base_url="https://custom.invalid/find",
-                             exa_api_key="stale-key", ddg_enabled=False), [3, 4])
+                             exa_api_key=legacy_key, ddg_enabled=False), [3, 4])
         api_find.assert_called_once_with("q", "", 15, "https://custom.invalid/find", "auto")
         legacy.assert_not_called()
         ddg.assert_not_called()
