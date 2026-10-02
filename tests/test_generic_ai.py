@@ -46,6 +46,12 @@ class TestGenericCli(unittest.TestCase):
                     read.assert_not_called()
                     engine.assert_not_called()
 
+    def test_partial_new_ai_connection_never_mixes_legacy_credentials(self):
+        old = {"VISION_API_KEY":"old-key", "VISION_BASE_URL":"https://old.invalid/v1", "VISION_MODEL":"old-model"}
+        for new in ({"AI_BASE_URL":"https://new.invalid/v1"}, {"AI_API_KEY":"new-key"}):
+            with mock.patch.dict(os.environ, {**old, **new}):
+                self.assertIsNone(smart.ai_backend())
+
     def test_unconfigured_and_benchmark_images_have_zero_outbound(self):
         for env in ({}, {"RUN_PROFILE":"benchmark", "AI_API_KEY":"test", "AI_BASE_URL":"https://api.invalid/v1"}):
             with mock.patch.dict(os.environ, env), \
@@ -109,6 +115,27 @@ class TestGenericCli(unittest.TestCase):
         self.assertEqual(requests[0].full_url, "https://search.invalid/api/search")
         self.assertEqual(requests[0].get_header("X-api-key"), "test-key")
         self.assertEqual(json.loads(requests[0].data)["includeDomains"], ["booth.pm"])
+
+    def test_new_search_connection_never_inherits_legacy_key(self):
+        with mock.patch.object(smart, "ddg_find") as ddg, \
+                mock.patch.object(smart, "api_find", return_value=[3, 3, 4]) as api_find, \
+                mock.patch.object(smart, "exa_find") as legacy:
+            self.assertEqual(smart.find_booth_item_ids("q", search_base_url="https://custom.invalid/find",
+                             exa_api_key="stale-key", ddg_enabled=False), [3, 4])
+        api_find.assert_called_once_with("q", "", 15, "https://custom.invalid/find", "auto")
+        legacy.assert_not_called()
+        ddg.assert_not_called()
+
+    def test_selected_search_api_reaches_custom_wire_contract(self):
+        requests = []
+        def respond(request, **kwargs):
+            requests.append(request)
+            return io.BytesIO(b'{"web":{"results":[{"url":"https://booth.pm/items/5"}]}}')
+        with mock.patch.object(api.socket, "getaddrinfo", return_value=[(2,1,6,"",("93.184.216.34",443))]), \
+                mock.patch.object(smart._AUTH_OPENER, "open", side_effect=respond):
+            self.assertEqual(smart.api_find("q", "user-key", base_url="https://custom.invalid", provider="brave"), [5])
+        self.assertEqual(requests[0].method, "GET")
+        self.assertEqual(requests[0].get_header("X-subscription-token"), "user-key")
 
 
 if __name__ == "__main__":

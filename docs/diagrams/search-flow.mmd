@@ -1,0 +1,18 @@
+%%{init: {"markdownAutoWrap":false,"theme":"base","themeVariables":{"fontFamily":"Noto Sans CJK SC, Microsoft YaHei, sans-serif","fontSize":"18px","primaryColor":"#e8f1ff","primaryBorderColor":"#527db3","primaryTextColor":"#17324d","lineColor":"#7890a5","secondaryColor":"#eff8f2","tertiaryColor":"#fff6e6"},"flowchart":{"curve":"basis","wrappingWidth":400,"nodeSpacing":35,"rankSpacing":45}}}%%
+flowchart TD
+    A["需求或关键词"] --> B["AI 规划或原词检索"]
+    B --> C["术语与读音变体<br/>单词级多路检索"]
+    C --> D["按商品 ID 合并<br/>去重与排序"]
+    C -.-> W["可选网页搜索适配器<br/>补充 BOOTH 商品链接"]
+    W --> D
+    D --> E["有限获取完整详情<br/>复用已有资料"]
+    E --> F["AI 评估并核验原文引用<br/>无 AI 时保留未核实状态"]
+    F --> G{"需要且能进行<br/>一次二轮检索？"}
+    G -->|"是"| H["只搜索新词<br/>补少量新详情并再评估"]
+    G -->|"否"| I["输出逐商品状态<br/>来源依据与降级说明"]
+    H --> I
+    J["共享间隔 · 冷却<br/>预算与截止时间"] -.-> C
+    J -.-> E
+    J -.-> H
+    classDef guard fill:#fff6e6,stroke:#b2945b,color:#76572c
+    class J guard

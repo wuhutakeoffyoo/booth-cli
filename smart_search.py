@@ -6,11 +6,11 @@
 - 自我纠错：知名商品回忆（模型 VRChat 圈知识）兜底
 - 检索变体：pykakasi 汉字→假名读音（可选依赖，未装跳过该维度）+ 去空格连写形
 - 描述核实：対応素体/仕様 写在商品说明文而非标题，拉详情按说明文匹配置顶
-- 网络检索兜底：站内搜不到时 DDG（免 key）/ Exa（EXA_API_KEY，可选）找 booth 商品链接
+- 网络检索兜底：DDG 与用户选择的搜索 API，按协议适配后只取 BOOTH 商品链接
 
-AI 后端为 OpenAI 兼容 chat/completions，环境变量与 vrc-booth-bot 同名
+AI 后端支持通用 HTTP 协议，环境变量与 vrc-booth-bot 同名
 （同机部署时一份 .env 两边通用）：
-  VISION_API_KEY / VISION_BASE_URL / VISION_MODEL / VISION_TIMEOUT
+  AI_API_KEY / AI_BASE_URL / AI_MODEL / VISION_TIMEOUT（旧 VISION_* 兼容）
   兜底：AI_FALLBACK_API_KEY / AI_FALLBACK_BASE_URL / AI_FALLBACK_MODEL
 零第三方依赖的边界：除标准库外，pykakasi 为**必装依赖**（假名读音变体，
 booth smart 依赖它；缺装时给出明确安装提示）。
@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 import search_evidence
 import provider_api
+import search_api
 
 try:
     import pykakasi  # 必装依赖（假名读音变体）；延迟到调用点报错以便给出安装提示
@@ -493,12 +494,16 @@ def ai_backend():
     import os
     if os.environ.get("RUN_PROFILE", "production") == "benchmark" and os.environ.get("BENCHMARK_ALLOW_AI", "").lower() not in ("true", "1"):
         return None
-    key = (os.environ.get("AI_API_KEY") or os.environ.get("VISION_API_KEY", "")).strip()
-    if not key:
+    new_connection = bool(os.environ.get("AI_API_KEY", "").strip() or
+                          os.environ.get("AI_BASE_URL", "").strip())
+    key = (os.environ.get("AI_API_KEY", "") if new_connection else
+           os.environ.get("VISION_API_KEY", "")).strip()
+    url = (os.environ.get("AI_BASE_URL", "") if new_connection else
+           os.environ.get("VISION_BASE_URL", "")).strip()
+    if not key or not url:
         return ai_fallback_backend()
-    new_connection = bool(os.environ.get("AI_API_KEY") and os.environ.get("AI_BASE_URL"))
     return {
-        "base_url": (os.environ.get("AI_BASE_URL") or os.environ.get("VISION_BASE_URL", "")).strip(),
+        "base_url": url,
         "api_key": key,
         "model": (os.environ.get("AI_MODEL", "") if new_connection else
                   os.environ.get("AI_MODEL") or os.environ.get("VISION_MODEL", "")).strip(),
@@ -668,22 +673,7 @@ def _validated_outbound_url(url: str) -> str:
 
 def item_ids_from_urls(urls: list) -> list:
     """从 URL 列表按出现顺序提取商品 ID（去重）。"""
-    ids = []
-    for u in urls:
-        try:
-            parts = urllib.parse.urlsplit(u)
-            host = (parts.hostname or "").lower()
-            if (parts.scheme not in ("http", "https") or parts.username or parts.password
-                    or (host != "booth.pm" and not host.endswith(".booth.pm"))):
-                continue
-            m = re.fullmatch(r"/(?:[a-z]{2}/)?items/(\d+)/?", parts.path)
-        except ValueError:
-            continue
-        if m:
-            iid = int(m.group(1))
-            if iid not in ids:
-                ids.append(iid)
-    return ids
+    return search_api.item_ids_from_urls(urls)
 
 
 def ids_from_ddg_html(content: str) -> list:
@@ -716,29 +706,39 @@ def ddg_find(keywords: str, timeout: int = 15) -> list:
         return []  # 数据中心 IP 偶被 DDG 挑战，静默降级
 
 
-def exa_find(keywords: str, api_key: str, timeout: int = 15,
-             base_url: str = "https://api.exa.ai") -> list:
-    """Exa AI 搜索（可选）：限定 booth.pm 域名，返回商品 ID 列表（失败返回空）。"""
+def api_find(keywords: str, api_key: str = "", timeout: int = 15,
+             base_url: str = "", provider: str = "auto") -> list:
+    """用户选择的检索 API；协议、认证、响应由适配层转换。失败返回空。"""
     try:
-        url = provider_api.exa_url(base_url)
-        body = json.dumps({"query": keywords, "numResults": 8,
-                           "includeDomains": ["booth.pm"]}).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers={
-            "x-api-key": api_key, "Content-Type": "application/json"})
+        wire = search_api.prepare(keywords, base_url, api_key, provider)
+        req = urllib.request.Request(wire.url, data=wire.body,
+                                     headers=wire.headers, method=wire.method)
         with _AUTH_OPENER.open(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
-        return item_ids_from_urls([r.get("url", "") for r in data.get("results", [])])
+            raw = resp.read(search_api.MAX_RESPONSE_BYTES + 1)
+        return search_api.parse_results(wire, raw)
     except Exception:
         return []
 
 
+def exa_find(keywords: str, api_key: str, timeout: int = 15,
+             base_url: str = "https://api.exa.ai") -> list:
+    """兼容旧调用；新配置使用 SEARCH_*。"""
+    return api_find(keywords, api_key, timeout, base_url, "exa")
+
+
 def find_booth_item_ids(keywords: str, *, exa_api_key: str = "",
                         exa_base_url: str = "https://api.exa.ai",
+                        search_api_key: str = "", search_base_url: str = "",
+                        search_provider: str = "auto", ddg_enabled: bool = True,
                         timeout: int = 15) -> list:
-    """网络检索兜底入口：DDG 优先，Exa 补充（配了 key 时），合并去重。"""
-    ids = ddg_find(keywords, timeout=timeout)
-    if exa_api_key:
-        for iid in exa_find(keywords, api_key=exa_api_key, timeout=timeout, base_url=exa_base_url):
-            if iid not in ids:
-                ids.append(iid)
+    """新搜索配置优先；未配置时兼容旧 Exa，不交叉复用不同服务的 key。"""
+    ids = ddg_find(keywords, timeout=timeout) if ddg_enabled else []
+    extra = []
+    if search_base_url:
+        extra = api_find(keywords, search_api_key, timeout, search_base_url, search_provider)
+    elif exa_api_key:
+        extra = exa_find(keywords, exa_api_key, timeout, exa_base_url)
+    for iid in extra:
+        if iid not in ids:
+            ids.append(iid)
     return ids

@@ -23,9 +23,9 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
 
-## 1.5.0 更新
+## 1.5.1 更新
 
-默认使用通用 API：填入 `AI_API_KEY + AI_BASE_URL` 自动发现模型，模型列表不可用时再补填 `AI_MODEL`。支持 OpenAI 兼容、Anthropic 与 Gemini 协议，旧 VISION_* 配置保留兼容。Exa 用独立 `EXA_API_KEY + EXA_BASE_URL` 接入原生或兼容检索端点。配置与流程图见 [AI_SETUP.md](AI_SETUP.md)。
+默认使用通用 API：填入 `AI_API_KEY + AI_BASE_URL` 自动发现模型，模型列表不可用时补填 `AI_MODEL`。支持 OpenAI 兼容、Anthropic 与 Gemini 协议，旧 VISION_* 兼容，新连接不继承旧模型名。网页搜索独立使用 `SEARCH_API_KEY + SEARCH_BASE_URL`，支持通用 JSON、Exa、Tavily、Brave、SearXNG 与自定义适配器，不绑定 OpenCode/GLM 或 Exa。配置与图片流程图见 [AI_SETUP.md](AI_SETUP.md)。
 
 模型先通过随机合成图检测才开放图片功能；未配置、不支持或暂无法确认时，关闭所有图片搜索入口，只允许文字搜索。独立 `imgsearch` 在读取或下载用户图片之前执行检测，不绕过限制调用图片反查。
 
@@ -41,21 +41,9 @@ RUN_PROFILE=benchmark 默认关闭 AI，独立账号/配额准备好后才设置
 
 本项目的设计重点，是把 BOOTH 检索、跨语言术语、商品原文证据和请求成本控制组合成可供 AI agent 调用的流程。下面描述的是已经实现的机制。
 
-```mermaid
-flowchart TD
-    A["需求或关键词"] --> B["AI 规划或原词检索"]
-    B --> C["术语与读音变体：单词级检索"]
-    C --> D["按商品 ID 合并、去重与排序"]
-    D --> E["有限获取完整详情并复用"]
-    E --> F["AI 可用时评估并校验原文引用"]
-    F --> G{"需要且能进行二轮？"}
-    G -->|"是"| H["最多一次二轮：新词检索与再评估"]
-    G -->|"否"| I["逐商品输出状态、依据与降级说明"]
-    H --> I
-    J["共享间隔、冷却、预算与截止时间"] -.-> C
-    J -.-> E
-    J -.-> H
-```
+![booth-cli 智能搜索流程图](docs/images/search-flow.png)
+
+[放大查看 SVG](docs/images/search-flow.svg)
 
 ### 1. 需求规划与行业词共同约束检索
 
@@ -93,7 +81,7 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
 
 ### 验证记录与适用范围
 
-2026-10-02 的 1.5.0 / Bot 0.3.0 本地验证：CLI 133 项、Bot 152 项、母项目契约 5 项，共 290 项通过。覆盖三类协议、自动模型选择、能力未知/不支持时全部图片入口关闭、能力撤销、配置别名、认证不重定向与自定义 Exa 端点。随机图片检测不代表搜品准确率已复测。
+2026-10-02 的 1.5.1 / Bot 0.3.1 本地验证：CLI 149 项、Bot 169 项、母项目契约 6 项，共 324 项通过。覆盖三类 AI 协议、自动模型选择、能力未知/不支持时全部图片入口关闭、能力撤销、配置迁移、搜索协议与自定义适配器、认证不重定向、旧 key 隔离与 BOOTH 链接校验。随机图片检测不代表搜品准确率已复测。
 
 2026-10-01 的 1.4.0 / Bot 0.2.0 配套验收：CLI 单元测试 103 项、Bot 单元测试 113 项、母项目契约测试 4 项，共 220 项通过；两仓库 Python 3.10 / 3.12 CI 通过。CLI 的并发预算测试使用真实子进程，见 [test_request_budget.py](tests/test_request_budget.py)；引用与否定条件测试见 [test_search_evidence.py](tests/test_search_evidence.py)。
 
