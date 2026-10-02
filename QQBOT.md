@@ -36,6 +36,7 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 - `imgsearch`：`image`（本地路径；URL 会先下载）、`engine`（默认 bing,ascii2d）、
   `headless`、`wait_s`、`limit`、`no_cache`。**注意慢**：浏览器备援路径可达 1-2 分钟，
   建议给足超时或只用 HTTP 快路径可用的部署环境（见 PROXY_DEPLOYMENT.md）。
+  必须在进程环境配置通过检测的多模态 AI；未配置/纯文字/能力未知时在读文件或下载前返回失败信封，所有图片引擎关闭。key 不放在 params 中，详见 [AI_SETUP.md](AI_SETUP.md)。
 
 **响应信封**（stdout，单行 JSON）：
 

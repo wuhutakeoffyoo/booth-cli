@@ -23,6 +23,12 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
 
+## 1.5.0 更新
+
+默认使用通用 API：填入 `AI_API_KEY + AI_BASE_URL` 自动发现模型，模型列表不可用时再补填 `AI_MODEL`。支持 OpenAI 兼容、Anthropic 与 Gemini 协议，旧 VISION_* 配置保留兼容。Exa 用独立 `EXA_API_KEY + EXA_BASE_URL` 接入原生或兼容检索端点。配置与流程图见 [AI_SETUP.md](AI_SETUP.md)。
+
+模型先通过随机合成图检测才开放图片功能；未配置、不支持或暂无法确认时，关闭所有图片搜索入口，只允许文字搜索。独立 `imgsearch` 在读取或下载用户图片之前执行检测，不绕过限制调用图片反查。
+
 ## 1.4.0 更新
 
 共享 SQLite 请求预算覆盖同机子进程、重试和重定向；429/503 冷却同步到所有 CLI。缓存命中不消耗出站许可。默认间隔 1 秒；配置 BOOTH_REQUEST_BUDGET_DB 时，所有子进程必须使用同一个本地文件。
@@ -87,6 +93,8 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
 
 ### 验证记录与适用范围
 
+2026-10-02 的 1.5.0 / Bot 0.3.0 本地验证：CLI 133 项、Bot 152 项、母项目契约 5 项，共 290 项通过。覆盖三类协议、自动模型选择、能力未知/不支持时全部图片入口关闭、能力撤销、配置别名、认证不重定向与自定义 Exa 端点。随机图片检测不代表搜品准确率已复测。
+
 2026-10-01 的 1.4.0 / Bot 0.2.0 配套验收：CLI 单元测试 103 项、Bot 单元测试 113 项、母项目契约测试 4 项，共 220 项通过；两仓库 Python 3.10 / 3.12 CI 通过。CLI 的并发预算测试使用真实子进程，见 [test_request_budget.py](tests/test_request_budget.py)；引用与否定条件测试见 [test_search_evidence.py](tests/test_search_evidence.py)。
 
 线上内部“铃铛”查询单次耗时 19.9 秒，使用 12 个 BOOTH 请求，展示六件商品，其中三件有有效来源引用、三件未核实。该次验收没有人工发送 QQ 消息；本地三条抽查含已有 HTTP 缓存。它们不构成冷启动性能或整体准确率评测，历史 93% 记录未在这一版本重新证明。大规模评测应使用独立账号/配额；`RUN_PROFILE=benchmark` 默认禁止 AI，更换同账号 key 不等于配额隔离。
@@ -98,7 +106,7 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
   商品**说明文**（対応素体/仕様 段落）匹配置顶；知名商品回忆与网络检索（DDG/Exa）
   兜底。策略与 [vrc-booth-bot](https://github.com/wuhutakeoffyoo/vrc-booth-bot) 同源。
   AI 读环境变量 `VISION_API_KEY/VISION_BASE_URL/VISION_MODEL`（与 bot 同名，一份 .env
-  两边通用），缺省自动降级为分词+读音变体直搜。
+  两边兼容；新配置用 `AI_API_KEY/AI_BASE_URL`），缺省自动降级为文字直搜。
 - **关键词搜索 / 商品详情 / 商店查询**：结构化 `--json` 输出，为 AI agent 调用设计。
   search/smart **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`--no-vrc` 搜全站）；
   popularity 排序翻页时自动切新着并标注（Booth 站点忽略 popularity 下的 page 参数）。
@@ -109,6 +117,7 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
   [kitUIN/PicImageSearch](https://github.com/kitUIN/PicImageSearch)，约 2 秒、无浏览器），
   被区域风控拒绝时自动回落 playwright 浏览器引擎（有头 + 持久 profile 过 Cloudflare），
   另有 ascii2d 备援；引擎派生词（图内文字）自动合并进关键词搜索。
+  必须先接入通过能力检测的多模态 API；检测未通过时不启用任何图片搜索引擎。
 - **磁盘缓存**：sqlite 实现（借鉴 [requests-cache](https://github.com/requests-cache/requests-cache)），
   商品 6 小时 / 搜索页 10 分钟，重复查询瞬时返回；`--no-cache` 强制最新。
 - **限流退避**：重试遵循 `Retry-After` 响应头，无头时指数退避 + 抖动
@@ -159,7 +168,7 @@ booth item https://booth.pm/ja/items/5813187
 # 商店信息与最新商品
 booth shop mukumi --json
 
-# 以图找品（Bing 纯HTTP优先 → 浏览器备援 → ascii2d；派生词自动合并）
+# 以图找品（先配置通过检测的多模态 API；再启用 Bing/ascii2d）
 booth imgsearch 商品图.jpg --json
 booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 ```

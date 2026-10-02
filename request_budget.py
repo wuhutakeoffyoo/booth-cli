@@ -211,7 +211,7 @@ def statistics():
 def semantic_fingerprint():
     base = Path(__file__).resolve().parent
     digest = hashlib.sha256()
-    for name in ("booth.py", "smart_search.py", "reverse_search.py", "request_budget.py", "search_evidence.py"):
+    for name in ("booth.py", "smart_search.py", "reverse_search.py", "request_budget.py", "search_evidence.py", "provider_api.py"):
         path = base / name
         digest.update(name.encode() + b"\0")
         digest.update(path.read_bytes() if path.is_file() else b"missing")
