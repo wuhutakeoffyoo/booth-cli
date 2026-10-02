@@ -47,7 +47,8 @@ class TestAuditRegression(unittest.TestCase):
             self.assertEqual(len(seen), 1)
             self.assertEqual(seen[0].get_header("Authorization"), "Bearer placeholder")
             seen.clear()
-            with mock.patch.object(smart_search, "_validated_outbound_url", side_effect=lambda u: u):
+            with mock.patch.object(smart_search.provider_api.socket, "getaddrinfo",
+                                   return_value=[(2, 1, 6, "", ("93.184.216.34", 443))]):
                 self.assertEqual(smart_search.exa_find("x", "placeholder"), [])
             self.assertEqual(len(seen), 1)
 
@@ -175,6 +176,8 @@ class TestAuditRegression(unittest.TestCase):
             def create(*a, **kw):
                 return original(*a, **dict(kw, dir=directory))
             with mock.patch.object(booth, "download_image", return_value=b"\xff\xd8fake"), \
+                    mock.patch.object(smart_search, "ai_backend", return_value={"base_url":"https://api.invalid/v1", "api_key":"placeholder", "model":"m", "timeout":1}), \
+                    mock.patch.object(smart_search.provider_api, "image_capability", return_value={"state":"supported", "model":"m"}), \
                     mock.patch.object(booth.tempfile, "NamedTemporaryFile", side_effect=create), \
                     mock.patch.object(reverse_search, "ascii2d_search", return_value=([], "")):
                 with self.assertRaises(booth.BoothError):

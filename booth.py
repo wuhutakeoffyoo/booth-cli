@@ -46,7 +46,7 @@ import request_budget
 import uuid
 import search_evidence
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -875,7 +875,8 @@ def cmd_smart(args):
         import os
         ids = smart_search.find_booth_item_ids(
             (kws_ai or [query])[0],
-            exa_api_key=os.environ.get("EXA_API_KEY", "").strip())
+            exa_api_key=os.environ.get("EXA_API_KEY", "").strip(),
+            exa_base_url=os.environ.get("EXA_BASE_URL", "https://api.exa.ai").strip())
         if ids:
             for iid in ids[:3]:
                 try:
@@ -954,6 +955,21 @@ def cmd_smart(args):
 
 
 def cmd_imgsearch(args):
+    import smart_search
+    provider = smart_search.provider_api
+    last = {"model": "未配置", "reason": "尚未配置可验证的多模态 API"}
+    for backend in (smart_search.ai_backend(), smart_search.ai_fallback_backend()):
+        if not backend:
+            continue
+        try:
+            last = provider.image_capability(backend["base_url"], backend["api_key"],
+                                            backend["model"], min(backend["timeout"], 15))
+        except provider.ProviderError:
+            last = {"model": backend["model"] or "自动模型", "reason": "模型能力检测暂不可用"}
+        if last.get("state") == "supported":
+            break
+    else:
+        raise BoothError(provider.image_notice(last))
     src = " ".join(args.image).strip()
     tmp_path = None
     if re.match(r"^https?://", src, re.I):
@@ -1151,7 +1167,7 @@ def cmd_bot(args):
         action = str(req.get("action", "")).strip()
         if action == "version":
             print(_bot_envelope(True, "version", {"version": __version__,
-                "capabilities": ["shared_request_budget", "search_evidence"],
+                "capabilities": ["shared_request_budget", "search_evidence", "verified_image_input", "generic_ai"],
                 "semantic_fingerprint": request_budget.semantic_fingerprint()}))
             return
         if action not in BOT_ACTIONS:
@@ -1276,7 +1292,7 @@ def build_parser():
     pm.add_argument("--page", type=int, default=1)
     pm.add_argument("--limit", type=int, default=6, help="最多返回条数（默认 6）")
     pm.add_argument("--no-ai", action="store_true",
-                    help="跳过 AI 需求解析（仅分词+读音变体直搜；默认读 VISION_API_KEY 等 env）")
+                    help="跳过 AI 需求解析（仅分词+读音变体直搜；默认读 AI_API_KEY/AI_BASE_URL）")
     pm.add_argument("--no-webfind", action="store_true",
                     help="禁用网络检索兜底（DDG/Exa）")
     pm.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")

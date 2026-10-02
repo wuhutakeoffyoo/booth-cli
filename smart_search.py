@@ -26,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import search_evidence
+import provider_api
 
 try:
     import pykakasi  # 必装依赖（假名读音变体）；延迟到调用点报错以便给出安装提示
@@ -397,7 +398,8 @@ def plan_search(text: str, *, base_url: str, api_key: str, model: str,
     feedback：保守重试场景下告知第一轮教训，让模型换更精确的词。
     输出不含 JSON 时带强化指令重试一次；失败抛 AiError 由调用方退化直搜。"""
     guard_api_base(base_url)
-    url = base_url.rstrip("/") + "/chat/completions"
+    model = provider_api.resolve_model(base_url, api_key, model, timeout=min(timeout, 15))
+    url = provider_api.endpoint(base_url, model)[2]
     prompt = f"{_PLAN_PROMPT}\n用户搜索请求：{text}"
     if feedback:
         prompt += f"\n上一轮搜索经验：{feedback}\n请据此换用更精确的行业词，避免重复无效词。"
@@ -424,7 +426,8 @@ def evaluate_results(query: str, keywords: list, titles: list, *,
                      timeout: int = 60) -> dict:
     """评估候选标题是否满足需求；verdict=retry 时 keywords 为第二轮搜索词。"""
     guard_api_base(base_url)
-    url = base_url.rstrip("/") + "/chat/completions"
+    model = provider_api.resolve_model(base_url, api_key, model, timeout=min(timeout, 15))
+    url = provider_api.endpoint(base_url, model)[2]
     payload = {
         "model": model,
         "messages": [{"role": "user",
@@ -490,14 +493,13 @@ def ai_backend():
     import os
     if os.environ.get("RUN_PROFILE", "production") == "benchmark" and os.environ.get("BENCHMARK_ALLOW_AI", "").lower() not in ("true", "1"):
         return None
-    key = os.environ.get("VISION_API_KEY", "").strip()
+    key = (os.environ.get("AI_API_KEY") or os.environ.get("VISION_API_KEY", "")).strip()
     if not key:
         return ai_fallback_backend()
     return {
-        "base_url": os.environ.get("VISION_BASE_URL",
-                                   "https://opencode.ai/zen/go/v1").strip(),
+        "base_url": (os.environ.get("AI_BASE_URL") or os.environ.get("VISION_BASE_URL", "")).strip(),
         "api_key": key,
-        "model": os.environ.get("VISION_MODEL", "glm-5.3-flash").strip(),
+        "model": (os.environ.get("AI_MODEL") or os.environ.get("VISION_MODEL", "")).strip(),
         "timeout": int(os.environ.get("VISION_TIMEOUT", "60") or 60),
     }
 
@@ -511,28 +513,19 @@ def ai_fallback_backend():
     if not key:
         return None
     return {
-        "base_url": os.environ.get("AI_FALLBACK_BASE_URL",
-                                   "https://open.bigmodel.cn/api/coding/paas/v4").strip(),
+        "base_url": os.environ.get("AI_FALLBACK_BASE_URL", "").strip(),
         "api_key": key,
-        "model": os.environ.get("AI_FALLBACK_MODEL", "glm-5.3-flash").strip(),
+        "model": os.environ.get("AI_FALLBACK_MODEL", "").strip(),
         "timeout": int(os.environ.get("VISION_TIMEOUT", "60") or 60),
     }
 
 
 def guard_api_base(base_url: str) -> str:
-    """出站前校验 API base：仅 https 且主机非本机/私网/保留地址。"""
-    parts = urllib.parse.urlsplit(base_url or "")
-    host = parts.hostname or ""
-    if parts.scheme != "https" or not host:
-        raise AiError(detail=f"AI base URL 必须是 https: {base_url}")
-    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1") or host.endswith((".local", ".internal")):
-        raise AiError(detail=f"AI base URL 主机不被允许: {host}")
+    """拒绝私网、URL 凭据与查询参数，不回显可能含凭据的 URL。"""
     try:
-        if ipaddress.ip_address(host).is_private or ipaddress.ip_address(host).is_reserved:
-            raise AiError(detail=f"AI base URL 指向私网/保留地址: {host}")
-    except ValueError:
-        pass  # 域名（非 IP 字面量），放行
-    return base_url
+        return provider_api.guard_url(base_url)
+    except provider_api.ProviderError as exc:
+        raise AiError(detail=str(exc)) from None
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -547,22 +540,19 @@ def _post_chat(url: str, payload: dict, api_key: str, timeout: int,
                retries: int = 2) -> str:
     """POST chat/completions，传输类/5xx 错误自动重试，返回回复文本。
     UA 用浏览器标识：Cloudflare WAF 会拦数据中心 IP + python 默认 UA 的大 body POST。"""
+    if "messages" in payload:
+        model = provider_api.resolve_model(url, api_key, payload.get("model", ""), timeout=min(timeout, 15))
+        payload = dict(payload, model=model)
+    url, payload, headers = provider_api.prepare(url, payload, api_key)
+    headers["User-Agent"] = _UA
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    headers = {"Authorization": f"Bearer {api_key}",
-               "Content-Type": "application/json",
-               "User-Agent": _UA}
     last_err = None
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with _AUTH_OPENER.open(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8", "replace"))
-            choice = (data.get("choices") or [{}])[0]
-            msg = choice.get("message") or {}
-            content = msg.get("content") or ""
-            if not content.strip():
-                content = msg.get("reasoning_content") or ""  # 推理模型兜底
-            return content
+            return provider_api.content(data)
         except urllib.error.HTTPError as e:
             detail = ""
             try:
@@ -570,6 +560,11 @@ def _post_chat(url: str, payload: dict, api_key: str, timeout: int,
             except Exception:
                 pass
             last_err = AiError(code=e.code, detail=detail)
+            compatible = provider_api.compatible_retry(payload, e.code, detail)
+            if compatible is not None and attempt < retries:
+                payload = compatible
+                body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                continue
             if e.code >= 500 and attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
                 continue
@@ -585,20 +580,16 @@ def _post_chat(url: str, payload: dict, api_key: str, timeout: int,
 
 def friendly_ai_error(e: Exception) -> str:
     """把 AI 调用异常翻译成准确、可行动的中文反馈。"""
+    if isinstance(e, provider_api.ProviderError):
+        return str(e)
     if isinstance(e, AiError) and e.code:
         code, body = e.code, (e.detail or "").lower()
         if code == 402 or "insufficient" in body or "no balance" in body:
-            return ("AI 额度不足：账户按量余额不够（套餐仅覆盖套餐内模型），请充值或换用套餐内模型")
+            return "AI 额度不足：请检查所接入服务的余额或模型权限"
         if code == 429 or "usage limit" in body or "limit exceeded" in body:
-            if "5 hour" in body or "5h" in body or "hourly" in body:
-                return "AI 已达套餐 5 小时用量上限，等窗口重置后自动恢复"
-            if "week" in body:
-                return "AI 已达套餐每周用量上限，周一自动恢复"
-            if "month" in body or "monthly" in body:
-                return "AI 已达套餐每月用量上限，次月自动恢复"
             return "AI 请求被限流（429）：触发用量上限或请求过频，请稍后再试"
         if code == 401:
-            return "AI 认证失败：API key 无效或已过期，请检查 VISION_API_KEY"
+            return "AI 认证失败：API key 无效或已过期，请检查 AI_API_KEY"
         if code == 403:
             return "AI 请求被拦截（403）：key 无权限或触发安全策略，请检查账户套餐状态"
         if code >= 500:
@@ -607,7 +598,7 @@ def friendly_ai_error(e: Exception) -> str:
     if isinstance(e, AiError):
         if "超时" in e.detail or "timed out" in e.detail.lower():
             return "AI 网络超时：端点响应过慢（模型繁忙），请稍后重试"
-        return f"AI 网络异常：{e.detail[:120]}"
+        return "AI 网络或配置异常：请检查端点与连接"
     if isinstance(e, TimeoutError):
         return "AI 网络超时：端点响应过慢（模型繁忙），请稍后重试"
     return f"AI 调用失败：{type(e).__name__}"
@@ -619,7 +610,8 @@ def translate_keywords(text: str, *, base_url: str, api_key: str, model: str,
     已被 plan_search（模型自决是否翻译）取代，保留备查。
     输出不含 JSON 时带强化指令重试一次。"""
     guard_api_base(base_url)
-    url = base_url.rstrip("/") + "/chat/completions"
+    model = provider_api.resolve_model(base_url, api_key, model, timeout=min(timeout, 15))
+    url = provider_api.endpoint(base_url, model)[2]
     prompt = f"{_TRANSLATE_PROMPT}\n用户需求：{text}"
     for attempt in range(2):
         payload = {
@@ -641,7 +633,8 @@ def recall_products(desc: str, *, base_url: str, api_key: str, model: str,
                     timeout: int = 60) -> list:
     """利用模型的 VRChat 圈知识回忆可能的知名商品名（自我纠错层）。"""
     guard_api_base(base_url)
-    url = base_url.rstrip("/") + "/chat/completions"
+    model = provider_api.resolve_model(base_url, api_key, model, timeout=min(timeout, 15))
+    url = provider_api.endpoint(base_url, model)[2]
     payload = {
         "model": model,
         "messages": [{"role": "user",
@@ -721,10 +714,11 @@ def ddg_find(keywords: str, timeout: int = 15) -> list:
         return []  # 数据中心 IP 偶被 DDG 挑战，静默降级
 
 
-def exa_find(keywords: str, api_key: str, timeout: int = 15) -> list:
+def exa_find(keywords: str, api_key: str, timeout: int = 15,
+             base_url: str = "https://api.exa.ai") -> list:
     """Exa AI 搜索（可选）：限定 booth.pm 域名，返回商品 ID 列表（失败返回空）。"""
     try:
-        url = _validated_outbound_url("https://api.exa.ai/search")
+        url = provider_api.exa_url(base_url)
         body = json.dumps({"query": keywords, "numResults": 8,
                            "includeDomains": ["booth.pm"]}).encode("utf-8")
         req = urllib.request.Request(url, data=body, headers={
@@ -737,11 +731,12 @@ def exa_find(keywords: str, api_key: str, timeout: int = 15) -> list:
 
 
 def find_booth_item_ids(keywords: str, *, exa_api_key: str = "",
+                        exa_base_url: str = "https://api.exa.ai",
                         timeout: int = 15) -> list:
     """网络检索兜底入口：DDG 优先，Exa 补充（配了 key 时），合并去重。"""
     ids = ddg_find(keywords, timeout=timeout)
     if exa_api_key:
-        for iid in exa_find(keywords, api_key=exa_api_key, timeout=timeout):
+        for iid in exa_find(keywords, api_key=exa_api_key, timeout=timeout, base_url=exa_base_url):
             if iid not in ids:
                 ids.append(iid)
     return ids
