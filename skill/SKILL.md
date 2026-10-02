@@ -15,7 +15,7 @@ description: 用 booth CLI 搜索/查询 Booth.pm（VRChat 素材、同人市场
 # 分词合并搜索、「适用于XX素体」类需求自动按商品说明文核实
 booth smart "适用于Rexouium素体的服装" --json
 booth smart "尾巴" --json            # 部位/用途类自动转行业词（尻尾/しっぽ/テイル）
-# AI 读环境变量 VISION_API_KEY/VISION_BASE_URL/VISION_MODEL（与 vrc-booth-bot 同名），
+# AI 读环境变量 AI_API_KEY/AI_BASE_URL（自动发现模型；旧 VISION_* 兼容），
 # 缺 key 或 --no-ai 时降级为分词+读音变体直搜（此时中文查询效果有限）；耗时约 30-90 秒
 
 # 关键词搜索（默认收窄 VRChat 圈 + 按新着序 + 联合搜索 R-18 带 is_adult 标记）。
@@ -66,6 +66,9 @@ booth shop mukumi --json
    软件类商品价格可能带 "~"（按规格浮动），照原样展示。
 
 ## 以图找品（拿到商品图反查 Booth 商品）
+
+**前置**：图片功能需先配置并通过多模态能力检测的 AI 接入（`booth imgsearch` 会在
+读图前自动检测；未配置/不支持时仅保留文字搜索）。详见 [AI_SETUP.md](../AI_SETUP.md)。
 
 **首选 `booth imgsearch`**（Bing 视觉搜索 + 派生词关键词自动合并）。
 引擎架构：**纯 HTTP 快路径优先**（无浏览器、约 2 秒；协议借鉴 kitUIN/PicImageSearch），
