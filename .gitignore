@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
+.env
+.env.*
+!.env.example
 .mimosa/
 .v2c/
 .tmp_vblind/

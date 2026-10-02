@@ -46,7 +46,7 @@ import request_budget
 import uuid
 import search_evidence
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -876,7 +876,12 @@ def cmd_smart(args):
         ids = smart_search.find_booth_item_ids(
             (kws_ai or [query])[0],
             exa_api_key=os.environ.get("EXA_API_KEY", "").strip(),
-            exa_base_url=os.environ.get("EXA_BASE_URL", "https://api.exa.ai").strip())
+            exa_base_url=os.environ.get("EXA_BASE_URL", "").strip() or "https://api.exa.ai",
+            search_api_key=os.environ.get("SEARCH_API_KEY", "").strip(),
+            search_base_url=os.environ.get("SEARCH_BASE_URL", "").strip(),
+            search_provider=os.environ.get("SEARCH_PROVIDER", "auto").strip(),
+            ddg_enabled=os.environ.get("SEARCH_DDG_ENABLED", "true").strip().lower()
+                        not in ("0", "false", "no", "off"))
         if ids:
             for iid in ids[:3]:
                 try:
@@ -1167,7 +1172,7 @@ def cmd_bot(args):
         action = str(req.get("action", "")).strip()
         if action == "version":
             print(_bot_envelope(True, "version", {"version": __version__,
-                "capabilities": ["shared_request_budget", "search_evidence", "verified_image_input", "generic_ai"],
+                "capabilities": ["shared_request_budget", "search_evidence", "verified_image_input", "generic_ai", "pluggable_web_search"],
                 "semantic_fingerprint": request_budget.semantic_fingerprint()}))
             return
         if action not in BOT_ACTIONS:
