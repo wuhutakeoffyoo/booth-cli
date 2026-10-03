@@ -212,7 +212,9 @@ class TestSmartStages(unittest.TestCase):
         value = json.loads(output.getvalue())
         self.assertEqual(value["items"][0]["relevance_status"], "related")
         self.assertNotIn("_desc", value["items"][0])
-        self.assertEqual(value["items"][3]["relevance_status"], "unknown")
+        self.assertEqual(len(value["items"]), 3)
+        self.assertEqual(value["quality"]["omitted"], 5)
+        self.assertEqual(items[3]["relevance_status"], "unknown")
 
     def test_benchmark_profile_does_not_use_configured_ai(self):
         with mock.patch.dict(os.environ, {"RUN_PROFILE": "benchmark", "VISION_API_KEY": "placeholder",
