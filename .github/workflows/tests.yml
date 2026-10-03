@@ -21,4 +21,4 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
-      - run: python -m compileall -q booth.py smart_search.py reverse_search.py provider_api.py scripts tests
+      - run: python -m compileall -q booth.py agent_workflow.py workflow_client.py smart_search.py reverse_search.py request_budget.py search_evidence.py provider_api.py search_api.py image_download.py scripts tests

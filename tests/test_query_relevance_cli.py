@@ -13,7 +13,7 @@ class TestSmartTargetFlow(unittest.TestCase):
     def run_search(self, evaluate):
         original = dict(id=1, name="みかんバード", detail_status="available", _desc="original source")
         noise = dict(id=2, name="AvatarPoseSystem", detail_status="available")
-        args = booth.build_parser().parse_args(["smart", "みかんバード", "--no-webfind", "--json"])
+        args = booth.build_parser().parse_args(["smart", "みかんバード", "--delegate-ai", "--no-webfind", "--json"])
         with mock.patch.object(smart_search, "ai_backend", return_value={"model": "offline"}), \
                 mock.patch.object(smart_search, "plan_search", return_value=(["VRChat", "アバター"], [], False)), \
                 mock.patch.object(booth, "_merged_search", side_effect=[([noise, original], {"total": 2}, None),

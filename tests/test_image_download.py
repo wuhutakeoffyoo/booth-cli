@@ -88,7 +88,9 @@ class ImageDownloadTests(unittest.TestCase):
         self.assertEqual(result.url, THUMBNAIL)
         self.assertIn("original: timeout", result.note)
         self.assertEqual([entry[0] for entry in observed], [ORIGINAL, THUMBNAIL])
-        self.assertLessEqual(observed[0][1], 0.2)
+        # Monotonic deadlines use floating-point addition/subtraction; permit
+        # sub-microsecond rounding while still enforcing the original budget.
+        self.assertLessEqual(observed[0][1], 0.2 + 1e-6)
         self.assertGreater(observed[1][1], 0.6)
 
     def test_missing_original_uses_thumbnail_and_says_why(self):

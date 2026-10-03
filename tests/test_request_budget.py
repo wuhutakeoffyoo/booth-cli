@@ -191,7 +191,7 @@ class TestSmartStages(unittest.TestCase):
     def test_full_details_before_evaluation_reused_for_output(self):
         items = [dict(id=i, name=f"衣装 {i}", price=100, shop={}, url=f"https://booth.pm/items/{i}")
                  for i in range(1, 9)]
-        args = booth.build_parser().parse_args(["smart", "Rexouium 衣装", "--no-webfind", "--json"])
+        args = booth.build_parser().parse_args(["smart", "Rexouium 衣装", "--delegate-ai", "--no-webfind", "--json"])
         def detail(item_id, _lang):
             return dict(id=int(item_id), name="衣装", description="説明 " * 2000 + "Rexouium 対応",
                         tags=[{"name": "VRChat"}], category="3D衣装")

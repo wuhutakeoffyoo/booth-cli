@@ -7,8 +7,9 @@
 Retry-After 感知的指数退避重试。
 
 用法:
-  booth smart  <需求描述...> [选项]    VRC 对口智能搜索：中文/需求式描述 → AI 关键词
-                                      + 说明文核实 + 分词合并（见 smart_search.py）
+  booth workflow <需求...> --keyword <检索词>  同一个 AI 的工具入口：返回候选与来源 JSON
+  booth workflow --schema             查看工作流接口，无网络请求
+  booth smart  <需求描述...> [选项]    本地词扩展检索；--delegate-ai 可选委托另一模型
   booth search <关键词...> [选项]     搜索全站商品
   booth item   <商品ID|URL> [选项]    查看商品详情
   booth shop   <商店子域名|URL> [选项] 查看商店信息与最新商品
@@ -20,7 +21,8 @@ Retry-After 感知的指数退避重试。
 AI 调用建议: 一律加 --json 获取结构化输出。
 内置对 booth.pm 的全局限速（每请求 ≥1 秒间隔）。
 search/smart 默认收窄 VRChat 圈（--tag VRChat），--no-vrc 关闭。
-smart 的 AI 需求解析读环境变量（与 vrc-booth-bot 同名）：VISION_API_KEY 等，缺省自动降级直搜。
+默认由调用者 AI 规划与判断，不读取 API 配置发起模型调用。
+smart/imgsearch 只有显式 --delegate-ai 才连接可选的 AI 服务。
 """
 
 import argparse
@@ -47,7 +49,7 @@ import request_budget
 import uuid
 import search_evidence
 
-__version__ = "1.5.3"
+__version__ = "1.6.0"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -711,9 +713,8 @@ def cmd_shop(args):
 
 
 # ---------------------------------------------------------------- 智能搜索（VRC 对口）
-# 策略与 vrc-booth-bot 同源：需求式描述 → AI 关键词（+说明文核实词）→ 单词级
-# 分词合并搜索 → 空结果回忆/网络检索兜底 → 拉详情按说明文匹配置顶。
-# 策略细节见 smart_search.py；AI 环境变量与 bot 同名，缺省自动降级直搜。
+# 默认仅做本地词扩展与站内检索。--delegate-ai 显式选择可选模型规划/评估。
+# 工作流中的当前 AI 应使用 workflow，直接提供检索词并读取来源资料。
 
 _SMART_WORKERS = 3           # 并发工作线程（出站仍受全局限速约束）
 
@@ -744,6 +745,7 @@ def _merged_search(terms, base_args, via="关键词"):
     返回 (merged_items, first_result, last_error)。单个词失败跳过。"""
     from concurrent.futures import ThreadPoolExecutor
     merged, seen, first_res, last_err = [], set(), None, None
+    successes, failures, has_next = 0, 0, False
 
     def _one(term):
         try:
@@ -755,7 +757,10 @@ def _merged_search(terms, base_args, via="关键词"):
         for res in pool.map(_one, terms[:6]):
             if isinstance(res, BoothError):
                 last_err = res
+                failures += 1
                 continue
+            successes += 1
+            has_next = has_next or bool(res.get("has_next"))
             if first_res is None:
                 first_res = res
             for it in res["items"]:
@@ -772,6 +777,9 @@ def _merged_search(terms, base_args, via="关键词"):
             return (-len(hit_idx), hit_idx[0] if hit_idx else len(low))
 
         merged.sort(key=_rank)
+    if first_res is not None:
+        first_res = dict(first_res, _search_successes=successes,
+                         _search_failures=failures, has_next=has_next)
     return merged, first_res, last_err
 
 
@@ -788,8 +796,10 @@ def _enrich_details(entries, desc_len=DEFAULT_DESC_LEN):
         except BoothError:
             it["detail_status"] = "unavailable"
             return
-        for k in ("wish_lists_count", "tags", "published_at", "category"):
-            if detail.get(k):
+        for k in ("wish_lists_count", "tags", "published_at", "category",
+                  "is_adult", "is_vrchat", "is_sold_out", "is_end_of_sale",
+                  "original_images", "thumbnail", "variations"):
+            if detail.get(k) is not None:
                 it[k] = detail[k]
         it["_desc"] = detail.get("description") or ""
         it["detail_status"] = "available"
@@ -810,6 +820,34 @@ def item_matches_policy(item, adult="include", tag=None):
             return tag.casefold() == "vrchat" and item.get("is_vrchat") is True
     return True
 
+def cmd_workflow(args):
+    """Execute caller-provided search axes without importing any AI provider."""
+    import agent_workflow
+    if args.schema:
+        print(json.dumps(agent_workflow.contract(), ensure_ascii=False, indent=2))
+        return
+    try:
+        query, terms = agent_workflow.search_plan(args.query, args.keyword,
+                                                args.limit, args.page, args.desc_len,
+                                                args.require_term)
+    except ValueError as exc:
+        raise BoothError(str(exc)) from None
+    if request_budget.context() is None:
+        with request_budget.query_context({"request_id": uuid.uuid4().hex,
+                "max_requests": 12, "deadline": time.time() + 180}):
+            return cmd_workflow(args)
+    args.sort, sort_note = effective_sort(args.sort, args.page)
+    merged, first_res, last_err = _merged_search(terms, args, via="caller")
+    if first_res is None:
+        raise last_err or BoothError("工作流检索未能完成")
+    candidates = merged[:args.limit]
+    _enrich_details(candidates, desc_len=-1)
+    print(json.dumps(agent_workflow.result(query, terms, candidates,
+        candidate_count=len(merged), search_info=first_res,
+        required_terms=args.require_term or [], desc_len=args.desc_len,
+        sort_note=sort_note), ensure_ascii=False, indent=2))
+
+
 def cmd_smart(args):
     import smart_search
     if request_budget.context() is None:
@@ -825,14 +863,15 @@ def cmd_smart(args):
     sort, sort_note = effective_sort(args.sort, args.page)
     args.sort = sort
 
-    # 1) 阶段 1：搜索方案（LLM 自行决定是否翻译；--no-ai/无配置退化为原词分词直搜；
-    #    主后端失败自动切兜底后端，与 bot 同款环境变量）
+    # 1) 委托必须显式选择；继承了 API 环境变量也不会自动调用另一模型。
     def _try_plan(bk):
         kws, dkws, translated = smart_search.plan_search(query, **bk)
         return kws, dkws, ("plan-translated" if translated else "plan")
 
     mode, kws_ai, desc_kws, ai_note = "direct", [], [], ""
-    backend = None if args.no_ai else smart_search.ai_backend()
+    backend = smart_search.ai_backend() if getattr(args, "delegate_ai", False) and not args.no_ai else None
+    if getattr(args, "delegate_ai", False) and not backend:
+        ai_note = "未配置可用的委托 AI，已使用本地词扩展检索"
     if backend:
         try:
             kws_ai, desc_kws, mode = _try_plan(backend)
@@ -855,8 +894,8 @@ def cmd_smart(args):
         kws = smart_search.expand_reading_variants(kws_ai)
         terms = smart_search.build_search_terms(kws)
     else:
-        kws = smart_search.expand_reading_variants(
-            [t for t in re.split(r"[\s/、，,]+", query) if len(t.strip()) >= 2] or [query])
+        direct = [t for t in re.split(r"[\s/、，,]+", query) if len(t.strip()) >= 2] or [query]
+        kws = smart_search.expand_reading_variants(smart_search.apply_industry_synonyms(query, direct))
         terms = smart_search.build_search_terms(kws)
 
     # 3) 分词合并搜索 → 有上限的完整详情 → 来源证据评估 → 可选二轮
@@ -986,7 +1025,8 @@ def cmd_smart(args):
                                                    desc_kws, assessed=bool(backend), display_limit=args.limit)
     selection_note = (f"已隐藏 {quality['omitted']} 件缺乏相关证据或不满足要求的候选，结果不足时不补满"
                       if quality["omitted"] else "")
-    items = [{k: v for k, v in it.items() if k != "_desc"}
+    items = [dict({k: v for k, v in it.items() if k != "_desc"},
+                  description=it.get("_desc") or None)
              for it in merged[:args.limit]]
 
     if args.json:
@@ -1028,6 +1068,9 @@ def cmd_smart(args):
 
 
 def cmd_imgsearch(args):
+    if not getattr(args, "delegate_ai", False):
+        raise BoothError("默认由当前 AI 读图并向 workflow 提交检索词；若当前模型不支持识图，"
+                         "请仅使用文字搜索。独立图搜须显式 --delegate-ai 并连接经检测支持识图的多模态 API")
     import smart_search
     provider = smart_search.provider_api
     last = {"model": "未配置", "reason": "尚未配置可验证的多模态 API"}
@@ -1182,12 +1225,12 @@ def _run_imgsearch(args, path, src):
 # 子进程调用 `booth bot '<json>'`（或 stdin 管道），返回统一 JSON 信封，
 # 永不抛栈、退出码恒为 0，ok 字段表达成败。详见 QQBOT.md。
 
-BOT_ACTIONS = ("search", "item", "shop", "imgsearch", "smart")
+BOT_ACTIONS = ("search", "item", "shop", "imgsearch", "smart", "workflow")
 _BOT_POSITIONAL = {"search": "query", "item": "id", "shop": "shop",
-                   "imgsearch": "image", "smart": "query"}
-_BOT_LIST_FLAGS = ("tag", "or_word", "exclude")
+                   "imgsearch": "image", "smart": "query", "workflow": "query"}
+_BOT_LIST_FLAGS = ("tag", "or_word", "exclude", "keyword", "require_term")
 _BOT_BOOL_FLAGS = ("vrc", "no_vrc", "in_stock", "full", "headless", "no_cache",
-                   "no_ai", "no_webfind")
+                   "no_ai", "no_webfind", "delegate_ai", "schema")
 
 
 def bot_params_to_argv(action, params):
@@ -1205,6 +1248,8 @@ def bot_params_to_argv(action, params):
             continue
         flag = "--" + key.replace("_", "-")
         if key in _BOT_BOOL_FLAGS:
+            if not isinstance(value, bool):
+                raise BoothError(f"{key} 必须是 JSON 布尔值 true/false")
             if value:
                 argv.append(flag)
         elif isinstance(value, list) or key in _BOT_LIST_FLAGS:
@@ -1240,7 +1285,8 @@ def cmd_bot(args):
         action = str(req.get("action", "")).strip()
         if action == "version":
             print(_bot_envelope(True, "version", {"version": __version__,
-                "capabilities": ["shared_request_budget", "search_evidence", "verified_image_input", "generic_ai", "pluggable_web_search"],
+                "capabilities": ["shared_request_budget", "search_evidence", "verified_image_input", "generic_ai", "pluggable_web_search", "caller_workflow", "explicit_ai_delegation"],
+                "ai_execution": {"default": "caller", "delegation": "explicit_opt_in"},
                 "semantic_fingerprint": request_budget.semantic_fingerprint()}))
             return
         if action not in BOT_ACTIONS:
@@ -1248,6 +1294,9 @@ def cmd_bot(args):
         extra = req.get("params") if isinstance(req.get("params"), dict) else {}
         flat = {k: v for k, v in req.items() if k not in ("action", "params", "context")}
         params = {**flat, **extra}
+        if action == "workflow":
+            import agent_workflow
+            agent_workflow.validate_params(params)
 
         argv = bot_params_to_argv(action, params) + ["--json"]
         err_buf, out_buf = io.StringIO(), io.StringIO()
@@ -1338,6 +1387,21 @@ def build_parser():
     add_common(ph)
     ph.set_defaults(func=cmd_shop)
 
+    pw = sub.add_parser("workflow", help="当前 AI 提供检索词，工具返回候选与商品来源 JSON（无模型调用）")
+    pw.add_argument("query", nargs="*", help="用户原始需求；可选 --keyword 提供当前 AI 规划的检索轴")
+    pw.add_argument("--keyword", action="append", help="完整检索轴，不再分词或改写；最多 6 个")
+    pw.add_argument("--require-term", action="append", help="需核对的素体/依赖等词，供来源摘要定位；不代表兼容已确认")
+    pw.add_argument("--sort", default="popularity", choices=SORTS)
+    pw.add_argument("--adult", default="include", choices=("exclude", "include", "only"))
+    pw.add_argument("--no-vrc", dest="vrc", action="store_false", help="关闭默认 VRChat 标签收窄")
+    pw.add_argument("--page", type=int, default=1)
+    pw.add_argument("--limit", type=int, default=6, help="返回并拉取详情的候选数量，1-6")
+    pw.add_argument("--desc-len", type=int, default=3000, help="每件商品返回的说明长度，1-12000；-1 返回完整说明")
+    pw.add_argument("--schema", action="store_true", help="输出机器可读的输入契约与示例，不访问网络")
+    pw.add_argument("--json", action="store_true", help="兼容标记；workflow 始终输出 JSON")
+    add_common(pw)
+    pw.set_defaults(func=cmd_workflow)
+
     pi2 = sub.add_parser("imgsearch", help="以图搜品（Bing 视觉搜索: HTTP 快路径+浏览器备援; ascii2d 备援）",
                          aliases=["is"])
     pi2.add_argument("image", nargs="+", help="本地图片路径 或 booth 官方图床的图片 URL")
@@ -1350,10 +1414,11 @@ def build_parser():
                      help="浏览器备援引擎等待结果的秒数（默认 24，bot 接入时可调小控时）")
     pi2.add_argument("--limit", type=int, default=5, help="最多返回候选数（默认 5）")
     pi2.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    pi2.add_argument("--delegate-ai", action="store_true", help="显式启用独立图搜并验证已配置的多模态 API")
     add_common(pi2)
     pi2.set_defaults(func=cmd_imgsearch)
 
-    pm = sub.add_parser("smart", help="VRC 对口智能搜索：需求式描述 → AI 关键词 + 说明文核实 + 分词合并",
+    pm = sub.add_parser("smart", help="本地词扩展搜索；--delegate-ai 可选委托其他 AI 规划与评估",
                         aliases=["sm"])
     pm.add_argument("query", nargs="+", help="需求描述（中文/日文均可，如：适用于Rexouium素体的服装）")
     pm.add_argument("--sort", default="popularity", choices=SORTS,
@@ -1364,8 +1429,11 @@ def build_parser():
                     help="关闭 VRChat 收窄（默认收窄 VRChat 圈）")
     pm.add_argument("--page", type=int, default=1)
     pm.add_argument("--limit", type=int, default=6, help="最多返回条数（默认 6）")
-    pm.add_argument("--no-ai", action="store_true",
-                    help="跳过 AI 需求解析（仅分词+读音变体直搜；默认读 AI_API_KEY/AI_BASE_URL）")
+    ai_choice = pm.add_mutually_exclusive_group()
+    ai_choice.add_argument("--delegate-ai", action="store_true",
+                           help="显式调用 AI_API_KEY/AI_BASE_URL 配置的可选 AI 规划与评估")
+    ai_choice.add_argument("--no-ai", action="store_true",
+                           help="兼容旧选项；默认已不调用 AI")
     pm.add_argument("--no-webfind", action="store_true",
                     help="禁用网络检索兜底（DDG/Exa）")
     pm.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")

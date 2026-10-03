@@ -39,7 +39,7 @@ class TestGenericCli(unittest.TestCase):
                         mock.patch.object(booth, "download_image") as download, \
                         mock.patch.object(booth.Path, "is_file") as read, \
                         mock.patch.object(booth, "_run_imgsearch") as engine:
-                    args = booth.build_parser().parse_args(["imgsearch", source])
+                    args = booth.build_parser().parse_args(["imgsearch", source, "--delegate-ai"])
                     with self.assertRaisesRegex(booth.BoothError, "请使用文字搜索"):
                         booth.cmd_imgsearch(args)
                     download.assert_not_called()
@@ -58,7 +58,7 @@ class TestGenericCli(unittest.TestCase):
                     mock.patch.object(api, "request_json") as wire, \
                     mock.patch.object(booth, "_run_imgsearch") as engine:
                 with self.assertRaisesRegex(booth.BoothError, "图片功能未启用"):
-                    booth.cmd_imgsearch(booth.build_parser().parse_args(["imgsearch", "a.jpg"]))
+                    booth.cmd_imgsearch(booth.build_parser().parse_args(["imgsearch", "a.jpg", "--delegate-ai"]))
                 wire.assert_not_called()
                 engine.assert_not_called()
 
@@ -71,7 +71,7 @@ class TestGenericCli(unittest.TestCase):
                     {"state":"supported", "model":"multi"}]) as capability, \
                 mock.patch.object(booth.Path, "is_file", return_value=True), \
                 mock.patch.object(booth, "_run_imgsearch") as engine:
-            booth.cmd_imgsearch(booth.build_parser().parse_args(["imgsearch", "a.jpg"]))
+            booth.cmd_imgsearch(booth.build_parser().parse_args(["imgsearch", "a.jpg", "--delegate-ai"]))
         self.assertEqual(capability.call_count, 2)
         engine.assert_called_once()
 
