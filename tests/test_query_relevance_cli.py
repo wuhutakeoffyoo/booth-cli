@@ -40,6 +40,13 @@ class TestSmartTargetFlow(unittest.TestCase):
         self.assertEqual(result["items"][0]["relevance_status"], "unknown")
         self.assertIn("尚未核实", result["eval_note"])
 
+    def test_negative_judgement_cannot_discard_exact_name_without_contradiction(self):
+        result, _ = self.run_search([{"verdict": "retry", "keywords": [], "evidence": [
+            {"item_id": "1", "field": "name", "quote": "みかんバード",
+             "status": "unsupported", "relation": "thematic"}]}])
+        self.assertEqual([it["id"] for it in result["items"]], [1])
+        self.assertEqual(result["items"][0]["relevance_status"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

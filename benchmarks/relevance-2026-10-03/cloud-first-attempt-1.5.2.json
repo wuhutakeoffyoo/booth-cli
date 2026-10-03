@@ -1,0 +1,49 @@
+{
+  "cli_sha": "53d3aa7377ee88f454d4435a66d6d0f6924c5815",
+  "bot_sha": "58a6ec1d4e6d6174fcf4dea08c3eb2c5195420fb",
+  "cli_version": "1.5.2",
+  "bot_version": "0.3.2",
+  "profile": "benchmark",
+  "vrc_tag": "VRChat",
+  "record": {
+    "query": "猫毛ウルフ",
+    "items": [
+      {
+        "id": 5274840,
+        "name": "【VR限定】ちょい甘スタイル｜BEAMS",
+        "relevance_status": "unknown",
+        "relevance_evidence": null
+      },
+      {
+        "id": 3463284,
+        "name": "#VRoid 正式版（stable ver.）&Beta：レースとファーのホーリーポインセチアのペプラムボレロ/HolyPoinsettia Christmas Bollero with lace and fake-fur",
+        "relevance_status": "unknown",
+        "relevance_evidence": null
+      },
+      {
+        "id": 2413327,
+        "name": "[VRoid] Bicolor Ankle Strap Pumps [VRoid β & Stable ver.]",
+        "relevance_status": "unknown",
+        "relevance_evidence": null
+      }
+    ],
+    "quality": {
+      "related": 0,
+      "unverified": 3,
+      "omitted": 296
+    },
+    "metrics": {
+      "wire_requests": 16,
+      "stages": {
+        "plan": 3.377988849009853,
+        "search": 7.267590381030459,
+        "details": 5.5311288550146855,
+        "evaluate": 6.645198698970489,
+        "details_round2": 3.1030927259707823,
+        "evaluate_round2": 11.756195034016855
+      }
+    },
+    "header": "共 9 件，显示前 3:\n检索词: 猫毛ウルフ / 猫毛 / ねこっけ（原词「猫毛ウルフ」）\n两轮搜索后仍未完全确认，以下为最接近的结果（可补充材质/颜色/用途等描述再试）\n已隐藏 296 件缺乏相关证据或不满足要求的候选，结果不足时不补满",
+    "elapsed_seconds": 38.534
+  }
+}
