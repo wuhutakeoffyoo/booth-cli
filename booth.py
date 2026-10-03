@@ -46,7 +46,7 @@ import request_budget
 import uuid
 import search_evidence
 
-__version__ = "1.5.2"
+__version__ = "1.5.3"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -819,7 +819,8 @@ def cmd_smart(args):
             ev = smart_search.evaluate_results(query, kws_ai or used_terms,
                                                titles, **backend)
             ev = smart_search.validate_evaluation(ev, titles)
-            ev = search_evidence.grounded_evaluation(ev, merged[:12], desc_kws)
+            ev = search_evidence.grounded_evaluation(ev, merged[:12], desc_kws,
+                target_query=search_evidence.literal_query(query, smart_search.INDUSTRY_SYNONYMS))
             print(f"[eval] 第一轮: {ev.get('verdict')} {ev.get('reason')}",
                   file=sys.stderr)
             # 保守 retry：评估员放行但标题命中率过低时仍触发二轮
@@ -860,7 +861,8 @@ def cmd_smart(args):
                             ev2 = smart_search.evaluate_results(query, terms2,
                                                                 titles2, **backend)
                             ev2 = smart_search.validate_evaluation(ev2, titles2)
-                            ev2 = search_evidence.grounded_evaluation(ev2, merged[:12], desc_kws)
+                            ev2 = search_evidence.grounded_evaluation(ev2, merged[:12], desc_kws,
+                                target_query=search_evidence.literal_query(query, smart_search.INDUSTRY_SYNONYMS))
                             eval_note = ("第二轮找到至少三条有来源证据的相关候选（适配以商品说明为准）"
                                          if ev2.get("verdict") == "ok" else
                                          "两轮搜索后仍未完全确认，以下为最接近的结果")

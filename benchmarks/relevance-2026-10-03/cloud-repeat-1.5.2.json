@@ -1,0 +1,115 @@
+{
+  "cli_sha": "53d3aa7377ee88f454d4435a66d6d0f6924c5815",
+  "bot_sha": "58a6ec1d4e6d6174fcf4dea08c3eb2c5195420fb",
+  "cli_version": "1.5.2",
+  "bot_version": "0.3.2",
+  "profile": "benchmark",
+  "vrc_tag": "VRChat",
+  "record": {
+    "trace": [
+      {
+        "phase": "plan",
+        "terms": [
+          "猫毛",
+          "猫毛ウルフ",
+          "ウルフカット",
+          "ヘアテクスチャ",
+          "猫毛ヘア"
+        ],
+        "required_terms": []
+      },
+      {
+        "phase": "evaluate",
+        "required_terms": [],
+        "reason": "仅候选1商品名与『猫毛ウルフ』完全一致且为3D髪型本体，其余候选为其他发型或纹理类商品，无一同用途支持，无法凑齐3条真实命中。",
+        "target_claims": [
+          {
+            "item_id": "8690386",
+            "field": "name",
+            "quote": "猫毛ウルフ【キプフェル対応】",
+            "status": "related",
+            "relation": "same_item"
+          }
+        ],
+        "before": [
+          {
+            "id": 8690386,
+            "name": "猫毛ウルフ【キプフェル対応】",
+            "relevance_status": null,
+            "relevance_evidence": null
+          }
+        ],
+        "after": [
+          {
+            "id": 8690386,
+            "name": "猫毛ウルフ【キプフェル対応】",
+            "relevance_status": "related",
+            "relevance_evidence": {
+              "field": "name",
+              "quote": "猫毛ウルフ【キプフェル対応】"
+            }
+          }
+        ]
+      },
+      {
+        "phase": "evaluate",
+        "required_terms": [],
+        "reason": "仅候选1是目标商品『猫毛ウルフ』本身（3D髪型、名称完全一致）；候选4是VRChat用ウルフ3D发型，可能同用途但无猫毛特征支持；其余为娃娃发件、VRoid或其",
+        "target_claims": [
+          {
+            "item_id": "8690386",
+            "field": "name",
+            "quote": "猫毛ウルフ【キプフェル対応】",
+            "status": "related",
+            "relation": "same_item"
+          }
+        ],
+        "before": [
+          {
+            "id": 8690386,
+            "name": "猫毛ウルフ【キプフェル対応】",
+            "relevance_status": "related",
+            "relevance_evidence": {
+              "field": "name",
+              "quote": "猫毛ウルフ【キプフェル対応】"
+            }
+          }
+        ],
+        "after": [
+          {
+            "id": 8690386,
+            "name": "猫毛ウルフ【キプフェル対応】",
+            "relevance_status": "related",
+            "relevance_evidence": {
+              "field": "name",
+              "quote": "猫毛ウルフ【キプフェル対応】"
+            }
+          }
+        ]
+      }
+    ],
+    "items": [
+      {
+        "id": 8690386,
+        "name": "猫毛ウルフ【キプフェル対応】",
+        "relevance_status": "related"
+      }
+    ],
+    "quality": {
+      "related": 1,
+      "unverified": 0,
+      "omitted": 254
+    },
+    "metrics": {
+      "wire_requests": 14,
+      "stages": {
+        "plan": 2.886772922007367,
+        "search": 3.3626010899897665,
+        "details": 3.802160808991175,
+        "evaluate": 8.480013385007624,
+        "details_round2": 3.332940118969418,
+        "evaluate_round2": 11.058332187996712
+      }
+    }
+  }
+}
