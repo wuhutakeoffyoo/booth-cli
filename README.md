@@ -1,15 +1,15 @@
 # booth-cli
 
 Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI agent 设计。
-核心以 Python 标准库实现，唯一依赖 pykakasi（假名读音变体，`smart` 使用），
-已安装为 `booth` 命令（`~/bin/booth` → 本目录 `booth.py`）。
+默认接入工作流中的**当前 AI**：由它规划检索词、读取商品原文并判断候选；工具只负责检索和资料获取，**无需第二个 AI、AI key 或 Exa**。`workflow / search / item / shop` 只用 Python 标准库，`smart` 的本地读音扩展另需 pykakasi。
+
+直接运行 `python booth.py`，或将仓库中的 `booth` 启动脚本加入 PATH。最小接入、工具 schema 和 Python 适配器见 [WORKFLOW_INTEGRATION.md](WORKFLOW_INTEGRATION.md)。
 
 运作原理、分层兜底思路、参考的开源项目与盲测方法论，见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 亮点
 
-- **三链路搜索，统一收敛 VRChat 圈**：日文关键词直搜 / 中文需求 LLM 转译 /
-  以图搜图（视觉模型读图生成关键词），三条链路默认全部收窄到 `VRChat` 标签圈。
+- **同一个 AI 完成搜索判断**：`workflow` 接受当前 AI 提供的完整检索轴，返回商品说明、规格、原始图片链接、来源摘要和缺失状态；工具不调用模型。需要独立 AI 规划/评估时，显式选择 `smart --delegate-ai`。
 - **小语种翻译不裸翻**：LLM 直译日语不可靠——借鉴 E 站（E-Hentai）AI 翻译本子类
   开源实践，以术语约束与写法规范驾驭模型：单词级关键词（Booth 多词 AND 匹配脆弱）、
   专有名词片假名完整转写、部位/用途行业词、假名读音与连写变体。
@@ -21,8 +21,22 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   **93%**（JP 95% / ZH 100%）。这些历史结果未在当前版本复测；本轮验证见下文。
   中文泛称查询的多轮盲测记录（方法/词表/逐轮结果/证据）见 [benchmarks/](benchmarks/)。
 - **每一层都有退路**：图搜引擎三级回落（Bing 纯 HTTP → 浏览器 → ascii2d → 派生词直搜）、
-  `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
+  `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；显式委托模式可配置 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
+
+## 1.6.0 更新：默认单 AI 工作流
+
+- 新增 `booth workflow` 与同名 JSON action：最多六个原样检索轴、六件详情；默认返回 JSON。`booth workflow --schema` 离线导出机器可读契约。
+- [workflow_client.py](workflow_client.py) 可直接作为当前 AI 的工具处理函数，使用 stdin JSON 和参数列表执行子进程，不需要模型 SDK、Bot 框架或额外模型配额。
+- API 密钥存在也不自动启用模型；`smart` 与独立 `imgsearch` 必须显式 `--delegate-ai` 才使用配置的 AI。`--no-ai` 继续兼容。
+- 当前 AI 若有工作流宿主提供的视觉能力，可自行读图提词后调用 `workflow`；文字模型仅用文字搜索。独立图搜仍先验证多模态能力，未通过不处理用户图片。
+- 返回的相关性和兼容性保持 `unknown`，由当前 AI 对照原始需求、商品原文和依赖判断；关键词提及不会自动升级为适配确认。部分检索失败、详情不可用和正文截断明确标记。
+
+![默认由同一个 AI 执行的工作流](docs/images/caller-workflow.png)
+
+[放大查看 SVG](docs/images/caller-workflow.svg)
+
+本地离线验证：CLI 237 项、配套 Bot 200 项、跨仓库契约 8 项。覆盖默认零模型调用、显式委托、无可选依赖的真实 stdin 接入及原图下载后端；这些测试不代表新的搜索准确率评测。
 
 ## 1.5.3 更新
 
@@ -32,7 +46,7 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
 
 文字智能搜索保留短目标原词，过滤模型输出的泛化检索词；二轮合并保留已有详情和相关性证据，已核实候选优先。找到明确相关候选或完整原词候选后，结果不足时不再用未核实商品补满。评估不可用时保留少量未核实建议并注明限制。实现、降级规则及评测边界见 [SEARCH_QUALITY.md](SEARCH_QUALITY.md)。
 
-## 1.5.1 更新
+## 1.5.1 更新（历史配置，1.6.0 起委托需显式启用）
 
 默认使用通用 API：填入 `AI_API_KEY + AI_BASE_URL` 自动发现模型，模型列表不可用时补填 `AI_MODEL`。支持 OpenAI 兼容、Anthropic 与 Gemini 协议，旧 VISION_* 兼容，新连接不继承旧模型名。网页搜索独立使用 `SEARCH_API_KEY + SEARCH_BASE_URL`，支持通用 JSON、Exa、Tavily、Brave、SearXNG 与自定义适配器，不绑定 OpenCode/GLM 或 Exa。配置与图片流程图见 [AI_SETUP.md](AI_SETUP.md)。
 
@@ -50,13 +64,15 @@ RUN_PROFILE=benchmark 默认关闭 AI，独立账号/配额准备好后才设置
 
 本项目的设计重点，是把 BOOTH 检索、跨语言术语、商品原文证据和请求成本控制组合成可供 AI agent 调用的流程。下面描述的是已经实现的机制。
 
-![booth-cli 智能搜索流程图](docs/images/search-flow.png)
+默认工作流见上图；下面是 `smart --delegate-ai` 的可选内部规划/评估链路。
+
+![booth-cli 可选委托搜索流程图](docs/images/search-flow.png)
 
 [放大查看 SVG](docs/images/search-flow.svg)
 
 ### 1. 需求规划与行业词共同约束检索
 
-AI 先决定是否翻译，并分别给出站内检索词与商品说明核实词；随后用固定行业词表、复合需求中的正向术语和 pykakasi 读音变体补齐日语表记。不同词分别检索，再按商品 ID 合并，减少把整句翻译成一个脆弱 AND 查询的问题。没有 AI 时使用原词分词和读音变体。二轮沿用相同归一流程，去掉已搜词，只保留最多三个新词。
+默认由当前 AI 决定是否翻译，并用 `workflow --keyword` 提交完整检索轴，工具不拆分或改写。可选 `smart --delegate-ai` 才让配置的模型生成检索词和商品说明核实词；本地行业词表与 pykakasi 补齐日语表记，按商品 ID 合并，二轮去掉已搜词、最多补三个新词。默认 `smart` 只做本地词扩展。
 
 实现入口：[smart_search.py](smart_search.py) 的 `plan_search`、`apply_industry_synonyms`、`expand_reading_variants`，以及 [booth.py](booth.py) 的 `cmd_smart`、`_merged_search`。
 
@@ -98,12 +114,12 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
 
 ## 特性
 
-- **智能搜索（VRC 对口，`booth smart`）**：中文/需求式描述直接入口——AI 产出单词级
+- **可选委托智能搜索（`booth smart --delegate-ai`）**：中文/需求式描述直接入口——AI 产出单词级
   日语关键词 + 说明文核实词，分词多路合并搜索，「适用于XX素体的服装」类需求按
   商品**说明文**（対応素体/仕様 段落）匹配置顶；知名商品回忆与网络检索（DDG/Exa）
   兜底。策略与 [vrc-booth-bot](https://github.com/wuhutakeoffyoo/vrc-booth-bot) 同源。
   AI 读环境变量 `VISION_API_KEY/VISION_BASE_URL/VISION_MODEL`（与 bot 同名，一份 .env
-  两边兼容；新配置用 `AI_API_KEY/AI_BASE_URL`），缺省自动降级为文字直搜。
+  两边兼容；新配置用 `AI_API_KEY/AI_BASE_URL`），只在显式委托时读取；默认不调用模型。
 - **关键词搜索 / 商品详情 / 商店查询**：结构化 `--json` 输出，为 AI agent 调用设计。
   search/smart **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`--no-vrc` 搜全站）；
   popularity 排序翻页时自动切新着并标注（Booth 站点忽略 popularity 下的 page 参数）。
@@ -114,7 +130,7 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
   [kitUIN/PicImageSearch](https://github.com/kitUIN/PicImageSearch)，约 2 秒、无浏览器），
   被区域风控拒绝时自动回落 playwright 浏览器引擎（有头 + 持久 profile 过 Cloudflare），
   另有 ascii2d 备援；引擎派生词（图内文字）自动合并进关键词搜索。
-  必须先接入通过能力检测的多模态 API；检测未通过时不启用任何图片搜索引擎。
+  此独立入口须显式 `--delegate-ai` 并接入通过能力检测的多模态 API；检测未通过时不启用任何图片搜索引擎。工作流中的当前 AI 可使用宿主原生识图后提交文字检索轴。
 - **磁盘缓存**：sqlite 实现（借鉴 [requests-cache](https://github.com/requests-cache/requests-cache)），
   商品 6 小时 / 搜索页 10 分钟，重复查询瞬时返回；`--no-cache` 强制最新。
 - **限流退避**：重试遵循 `Retry-After` 响应头，无头时指数退避 + 抖动
@@ -144,9 +160,11 @@ Booth 无官方公开 API；调研过的开源项目（boothmate / BoothPM-SDK /
 ```bash
 booth help                          # 帮助
 
-# 智能搜索（VRC 对口推荐入口：中文/需求式描述 → AI 关键词 + 说明文核实 + 分词合并）
-booth smart "适用于Rexouium素体的服装" --json
-booth smart "尾巴" --no-ai --json    # 跳过 AI（分词+读音变体直搜）
+# 推荐：由当前 AI 规划，工具原样执行并返回来源，无需 API
+booth workflow "适用于Rexouium素体的服装" --keyword "Rexouium 衣装" --require-term Rexouium
+booth workflow --schema            # 离线发现接口
+booth smart "尾巴" --json          # 本地行业词/读音扩展，无模型调用
+booth smart "适用于Rexouium素体的服装" --delegate-ai --json  # 可选额外 AI
 
 # 搜索（默认收窄 VRChat 圈、新着序、联合 R-18）
 booth search "VRChat アバター" --limit 10 --json
@@ -166,8 +184,8 @@ booth item https://booth.pm/ja/items/5813187
 booth shop mukumi --json
 
 # 以图找品（先配置通过检测的多模态 API；再启用 Bing/ascii2d）
-booth imgsearch 商品图.jpg --json
-booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
+booth imgsearch 商品图.jpg --delegate-ai --json
+booth imgsearch "https://booth.pximg.net/..." --delegate-ai --engine ascii2d --headless --json
 ```
 
 所有命令支持 `--no-cache` 跳过磁盘缓存强制重新请求。
@@ -211,7 +229,7 @@ booth imgsearch "https://booth.pximg.net/..." --engine ascii2d --headless --json
 
 ## 环境要求
 
-Python 3.8+；安装依赖：`pip install -r requirements.txt`（pykakasi，假名读音变体，必装）。
+Python 3.10+。默认 workflow/search/item/shop 无第三方依赖；使用 smart 读音扩展时安装 `pip install -r requirements.txt`（pykakasi）。
 Windows（Git Bash / CMD）与 Linux/macOS 均可运行。
 
 ## 部署与网络
@@ -220,7 +238,7 @@ CLI 是纯本地程序，部署在哪台机器都可以，关键是**网络能�
 
 ### 方式一：本地部署（推荐起步）
 
-1. 安装 Python 3.8+ 与依赖：`pip install -r requirements.txt`；
+1. 安装 Python 3.10+；smart 读音扩展需 `pip install -r requirements.txt`；
 2. 把本目录加入 PATH（或建 `booth` 别名指向 `booth.py`），运行 `booth search "猫耳" --json` 验证；
 3. 网络不通时按下面的代理引导配置。
 
@@ -246,7 +264,7 @@ CLI 是纯本地程序，部署在哪台机器都可以，关键是**网络能�
 
 1. **基础用法**——搜索/详情/商店的推荐调用方式（一律 `--json`）
 2. **多商品对比**——三轴关键词探测 + 缺席检查 + 五层维度对比（事实/能力/成本/信号/结论）
-3. **以图找品**——读图提词 → 两轴搜索取交集 → 下载商品图视觉比对（含 pximg Referer 与缩略图 URL 改写技巧）
+3. **以图找品**——有原生视觉能力的当前 AI 读图提词 → 检索 → 使用详情返回的精确原图/缩略图 URL 下载后比较；文字模型提示限制，不启用识图。
 
 安装方法：把 `skill/` 目录复制为各 agent 的技能目录下的 `booth/`（如 `~/.zcode/skills/booth`、`~/.agents/skills/booth`、`~/.codex/skills/booth`）。
 

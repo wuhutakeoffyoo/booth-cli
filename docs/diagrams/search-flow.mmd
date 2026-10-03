@@ -1,6 +1,6 @@
 %%{init: {"markdownAutoWrap":false,"fontFamily":"Microsoft YaHei","fontSize":18,"theme":"base","themeVariables":{"fontFamily":"Noto Sans CJK SC, Microsoft YaHei, sans-serif","fontSize":"18px","primaryColor":"#e8f1ff","primaryBorderColor":"#527db3","primaryTextColor":"#17324d","lineColor":"#7890a5","secondaryColor":"#eff8f2","tertiaryColor":"#fff6e6"},"flowchart":{"curve":"basis","wrappingWidth":400,"nodeSpacing":35,"rankSpacing":45}}}%%
 flowchart TD
-    A["需求或关键词"] --> B["AI 规划或原词检索"]
+    A["可选 smart --delegate-ai<br/>需求或关键词"] --> B["显式选择的 AI 规划<br/>失败退回本地词扩展"]
     B --> C["术语与读音变体<br/>单词级多路检索"]
     C --> D["按商品 ID 合并<br/>去重与排序"]
     C -.-> W["可选网页搜索适配器<br/>补充 BOOTH 商品链接"]

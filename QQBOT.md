@@ -3,6 +3,8 @@
 CLI 提供一个**稳定的 JSON 信封接口** `booth bot`：子进程调用、stdout 进出、
 退出码恒为 0、永不抛栈，任何能 spawn 子进程或读管道的 bot 框架都能接入。
 
+同一个 AI 的工作流推荐 `action=workflow`：调用者提供检索轴，工具仅返回商品来源。默认不读取密钥调用另一模型；可使用 [workflow_client.py](workflow_client.py)，见 [WORKFLOW_INTEGRATION.md](WORKFLOW_INTEGRATION.md)。
+
 ## 接口契约
 
 **调用**（两种等价方式）：
@@ -16,7 +18,7 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 
 | 字段 | 说明 |
 |---|---|
-| `action` | `search` / `item` / `shop` / `imgsearch` / `smart` / `version` |
+| `action` | `workflow` / `search` / `item` / `shop` / `imgsearch` / `smart` / `version` |
 | `params` | 与 CLI 旗标同名的 snake_case 参数（`--or-word` → `"or_word"`，`--no-cache` → `"no_cache": true`） |
 | 平铺写法 | 也接受 `{"action":"search","query":"...","limit":5}` 直接把参数平铺在顶层 |
 | `context` | 1.4.0 起可选：request_id、max_requests、deadline，多个子进程共享同次查询的出站上限 |
@@ -27,14 +29,12 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
   `tag[]`、`or_word[]`、`exclude[]`、`min_price`、`max_price`、`in_stock`、`vrc`、`no_vrc`、
   `category`、`event`、`lang`、`page`、`pages`、`limit`、`no_cache`。
   **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`"no_vrc": true` 搜全站）
-- `smart`：`query`（需求式描述，中文/日文均可）、`sort`、`adult`、`no_vrc`、`page`、
-  `limit`、`no_ai`、`no_webfind`、`no_cache`。AI 需求解析读 CLI 进程环境变量
-  （`VISION_API_KEY` 等，与 vrc-booth-bot 同名），缺省降级直搜；**耗时约 30-90 秒**
-  （AI + 多路搜索 + 详情核实），建议超时给 120s+
+- `workflow`：`query`（原始需求字符串）、`keyword[]`（最多六个完整轴）、`require_term[]`、`sort`、`adult`、`no_vrc`、`page`、`limit`（1-6）、`desc_len`、`no_cache`。`schema:true` 离线查看契约。默认只访问 BOOTH，返回来源说明/规格/精确图片地址与缺失状态，相关性和适配均待调用者核查。
+- `smart`：`query`、`sort`、`adult`、`no_vrc`、`page`、`limit`、`delegate_ai`、`no_ai`、`no_webfind`、`no_cache`。默认本地词扩展；只有 `delegate_ai:true` 才读 CLI 进程的 AI 配置做内部规划/评估。存在密钥也不会自动启用。委托模式建议总超时 180s。
 - `item`：`id`（数字/字符串/URL）、`desc_len`、`full`、`no_cache`
 - `shop`：`shop`（子域名或 URL）、`pages`、`no_cache`
 - `imgsearch`：`image`（本地路径；URL 会先下载）、`engine`（默认 bing,ascii2d）、
-  `headless`、`wait_s`、`limit`、`no_cache`。**注意慢**：浏览器备援路径可达 1-2 分钟，
+  `headless`、`wait_s`、`limit`、`no_cache`、`delegate_ai`。须显式 `delegate_ai:true`。**注意慢**：浏览器备援路径可达 1-2 分钟，
   建议给足超时或只用 HTTP 快路径可用的部署环境（见 PROXY_DEPLOYMENT.md）。
   必须在进程环境配置通过检测的多模态 AI；未配置/纯文字/能力未知时在读文件或下载前返回失败信封，所有图片引擎关闭。key 不放在 params 中，详见 [AI_SETUP.md](AI_SETUP.md)。
 
@@ -46,6 +46,8 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 ```
 
 `data` 即各命令 `--json` 的原始输出（字段说明见 README / skill/SKILL.md）。
+
+布尔选项须使用 JSON true/false；字符串 `"false"` 会报参数错误，防止误启用委托或反转筛选策略。
 
 携带 context 时，request_id 是 8–64 位 ASCII 字母/数字/下划线/短横线，max_requests 为 1–100 的整数，deadline 是不超过未来 15 分钟的有限 Unix 时间戳。相同 request_id 的子进程使用同机 SQLite 累计 used；同次查询显式增大 max_requests 可扩展上限，但不清零计数或延长原截止时间。缓存命中不增加 used。
 

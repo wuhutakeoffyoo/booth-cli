@@ -182,7 +182,7 @@ class TestAuditRegression(unittest.TestCase):
                     mock.patch.object(reverse_search, "ascii2d_search", return_value=([], "")):
                 with self.assertRaises(booth.BoothError):
                     booth.cmd_imgsearch(booth.build_parser().parse_args([
-                        "imgsearch", "https://booth.pximg.net/test.jpg", "--engine", "ascii2d"]))
+                        "imgsearch", "https://booth.pximg.net/test.jpg", "--delegate-ai", "--engine", "ascii2d"]))
             self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_evaluation_requires_three_real_unique_candidates(self):
