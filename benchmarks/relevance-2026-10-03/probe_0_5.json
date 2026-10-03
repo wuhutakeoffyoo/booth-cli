@@ -1,0 +1,665 @@
+{
+ "猫毛ウルフ": {
+  "query": "猫毛ウルフ",
+  "header": "共 5 件，显示前 1:\n检索词: 猫毛ウルフ / ウルフ / 猫毛（原词「猫毛ウルフ」）\n两轮搜索后仍未完全确认，以下为最接近的结果（可补充材质/颜色/用途等描述再试）\n已隐藏 271 件缺乏相关证据或不满足要求的候选，结果不足时不补满",
+  "elapsed_seconds": 38.187,
+  "notices": [
+   "第一轮结果不太对，正在执行第二轮搜索…"
+  ],
+  "metrics": {
+   "wire_requests": 18,
+   "stages": {
+    "plan": 3.7810000000172295,
+    "search": 6.234000000025844,
+    "details": 6.0,
+    "evaluate": 7.9689999999827705,
+    "details_round2": 1.562999999994645,
+    "evaluate_round2": 7.797000000020489
+   }
+  },
+  "quality": {
+   "related": 1,
+   "unverified": 0,
+   "omitted": 271
+  },
+  "items": [
+   {
+    "id": 8690386,
+    "name": "猫毛ウルフ【キプフェル対応】",
+    "url": "https://booth.pm/ja/items/8690386",
+    "category": "3D髪型",
+    "tags": [
+     "3Dモデル",
+     "ショートヘア",
+     "髪型",
+     "VRChat",
+     "まめふれんず",
+     "キプフェル",
+     "キプフェル対応",
+     "きぷふぇる",
+     "kipfel対応",
+     "pill1ng",
+     "メディア掲載OK"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "猫毛ウルフ【キプフェル対応】"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   }
+  ]
+ },
+ "みかんバード": {
+  "query": "みかんバード",
+  "header": "共 948 件，显示前 1:\n检索词: みかんバード / みかん / 鳥（原词「みかんバード」）\n两轮搜索后仍未完全确认，以下为最接近的结果（可补充材质/颜色/用途等描述再试）\n已隐藏 179 件缺乏相关证据或不满足要求的候选，结果不足时不补满",
+  "elapsed_seconds": 19.328,
+  "notices": [
+   "第一轮结果不太对，正在执行第二轮搜索…"
+  ],
+  "metrics": {
+   "wire_requests": 8,
+   "stages": {
+    "plan": 1.2190000000118744,
+    "search": 0.8589999999967404,
+    "details": 0.8129999999946449,
+    "evaluate": 4.062000000005355,
+    "details_round2": 2.937999999994645,
+    "evaluate_round2": 6.171999999991385
+   }
+  },
+  "quality": {
+   "related": 1,
+   "unverified": 0,
+   "omitted": 179
+  },
+  "items": [
+   {
+    "id": 8882640,
+    "name": "cluster想定アバター みかんバード",
+    "url": "https://booth.pm/ja/items/8882640",
+    "category": "3Dキャラクター",
+    "tags": [
+     "3Dモデル",
+     "VRM",
+     "clusterアバター"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "cluster想定アバター みかんバード"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   }
+  ]
+ },
+ "ソーダフロート": {
+  "query": "ソーダフロート",
+  "header": "共 84 件，显示前 1:\n检索词: ソーダフロート / フロート / ドリンクギミック（原词「ソーダフロート」）\n两轮搜索后仍未完全确认，以下为最接近的结果（可补充材质/颜色/用途等描述再试）\n已隐藏 131 件缺乏相关证据或不满足要求的候选，结果不足时不补满",
+  "elapsed_seconds": 41.219,
+  "notices": [
+   "第一轮结果不太对，正在执行第二轮搜索…"
+  ],
+  "metrics": {
+   "wire_requests": 7,
+   "stages": {
+    "plan": 1.6719999999913853,
+    "search": 0.610000000015134,
+    "details": 0.625,
+    "evaluate": 8.875,
+    "details_round2": 2.5,
+    "evaluate_round2": 18.484000000025844
+   }
+  },
+  "quality": {
+   "related": 1,
+   "unverified": 0,
+   "omitted": 131
+  },
+  "items": [
+   {
+    "id": 7310630,
+    "name": "【3Dアイテム】サマードリンクセット",
+    "url": "https://booth.pm/ja/items/7310630",
+    "category": "3D小道具",
+    "tags": [
+     "3D",
+     "氷",
+     "3DCG",
+     "Blender",
+     "食べ物",
+     "スイーツ",
+     "ストロベリー",
+     "小物",
+     "夏",
+     "3Dデータ",
+     "パーティー",
+     "カフェ",
+     "アイス",
+     "食品",
+     "Unity",
+     "ソーダ",
+     "3Dモデル",
+     "飲み物",
+     "3D素材",
+     "クリームソーダ",
+     "ストロー",
+     "アイスクリーム",
+     "レモン",
+     "浮き輪",
+     "ドリンク",
+     "FBX",
+     "Ice",
+     "ソーダフロート",
+     "フロート",
+     "VRChat",
+     "UnityPackage",
+     "VRChat可",
+     "VRC想定モデル",
+     "3D用オブジェクト",
+     "3Dキャラクター用装飾",
+     "float",
+     "3D食べ物",
+     "Icecream"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "tags",
+     "quote": "クリームソーダ / ストロー / アイスクリーム / レモン / 浮き輪 / ドリンク / FBX / Ice / ソーダフロート / フロート"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   }
+  ]
+ },
+ "羽根ペン": {
+  "query": "羽根ペン",
+  "header": "共 16 件，显示前 5:\n检索词: 羽根ペン / はねペン / フェザーペン（原词「羽根ペン」）\n已隐藏 61 件缺乏相关证据或不满足要求的候选，结果不足时不补满",
+  "elapsed_seconds": 20.125,
+  "notices": [],
+  "metrics": {
+   "wire_requests": 11,
+   "stages": {
+    "plan": 1.5469999999913853,
+    "search": 4.75,
+    "details": 5.73399999999674,
+    "evaluate": 8.094000000011874
+   }
+  },
+  "quality": {
+   "related": 5,
+   "unverified": 0,
+   "omitted": 61
+  },
+  "items": [
+   {
+    "id": 7346612,
+    "name": "【Free】一部無料 魔法の羽根ペン アバター＆ワールド用(QvPen差し替え) Magical Quill Pen For Avatar ＆For World(QvPen)(FREE) #MURASAKIYA",
+    "url": "https://booth.pm/ja/items/7346612",
+    "category": "3D小道具",
+    "tags": [
+     "ボールペン",
+     "無料",
+     "無料配布",
+     "無料DL",
+     "Free",
+     "羽根",
+     "万年筆",
+     "ペン",
+     "ワールド",
+     "FREE",
+     "pencil",
+     "pen",
+     "万年筆インク",
+     "VRChat",
+     "VRChat可",
+     "ワールド小物",
+     "VRC想定モデル",
+     "VRChat 3Dモデル",
+     "VRChatギミック",
+     "VRChat想定モデル",
+     "VRChatワールド",
+     "VRChat想定モデル(アクセサリー)",
+     "羽根モチーフ",
+     "VRChat向け",
+     "worldcreation",
+     "羽根ペン",
+     "FREE DL",
+     "ワールド制作",
+     "worldasset",
+     "無料DL可",
+     "ワールドギミック",
+     "FREE 3D MODEL",
+     "world props",
+     "world model",
+     "アバターペン",
+     "無言勢",
+     "Qvペン",
+     "無言",
+     "world assets",
+     "world-assets",
+     "Qvpen",
+     "QvPen差し替えモデル",
+     "world asset"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "【Free】一部無料 魔法の羽根ペン アバター＆ワールド用(QvPen差し替え)"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 1134340,
+    "name": "羽根ペン",
+    "url": "https://booth.pm/ja/items/1134340",
+    "category": "3Dモデル（その他）",
+    "tags": [
+     "Unity",
+     "3Dモデル",
+     "VRChat"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "羽根ペン"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 7646684,
+    "name": "【QvPen差し替え用モデル付き】アンティーク風羽根ペンセット",
+    "url": "https://booth.pm/ja/items/7646684",
+    "category": "3D小道具",
+    "tags": [
+     "アンティーク",
+     "ハンカチ",
+     "ペン",
+     "インク瓶",
+     "Pen",
+     "VRChat",
+     "VRC想定モデル",
+     "Handkerchief",
+     "Inkwell"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "【QvPen差し替え用モデル付き】アンティーク風羽根ペンセット"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 1623161,
+    "name": "Free 羽根ペン Feather Pen",
+    "url": "https://booth.pm/ja/items/1623161",
+    "category": "3Dモデル（その他）",
+    "tags": [
+     "Unity",
+     "FBX",
+     "Pen",
+     "VRChat"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "Free 羽根ペン Feather Pen"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 8527557,
+    "name": "【QVPen差し替えモデル】ローポリはねペン",
+    "url": "https://booth.pm/ja/items/8527557",
+    "category": "3D小道具",
+    "tags": [
+     "ローポリ",
+     "3Dモデル",
+     "ペン",
+     "羽ペン",
+     "VRChat",
+     "ワールドギミック",
+     "QvPen",
+     "クイル",
+     "差し替えモデル"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "【QVPen差し替えモデル】ローポリはねペン"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   }
+  ]
+ },
+ "拡声器": {
+  "query": "拡声器",
+  "header": "共 17 件，显示前 6:\n检索词: 拡声器 / かくせいき / メガホン（原词「拡声器」）\n已隐藏 112 件缺乏相关证据或不满足要求的候选，结果不足时不补满",
+  "elapsed_seconds": 20.297,
+  "notices": [],
+  "metrics": {
+   "wire_requests": 12,
+   "stages": {
+    "plan": 1.3900000000139698,
+    "search": 6.437999999994645,
+    "details": 5.48399999999674,
+    "evaluate": 6.969000000011874
+   }
+  },
+  "quality": {
+   "related": 6,
+   "unverified": 0,
+   "omitted": 112
+  },
+  "items": [
+   {
+    "id": 1588810,
+    "name": "拡声器・メガホン カラー11種 VRC想定",
+    "url": "https://booth.pm/ja/items/1588810",
+    "category": "3Dモデル（その他）",
+    "tags": [
+     "小物",
+     "VRChat",
+     "3D用オブジェクト"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "拡声器・メガホン カラー11種 VRC想定"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 8437805,
+    "name": "Kuraya式防音室&拡声器ギミック",
+    "url": "https://booth.pm/ja/items/8437805",
+    "category": "3Dツール・システム",
+    "tags": [
+     "イベント",
+     "ワールド",
+     "メガホン",
+     "拡声器",
+     "ギミック",
+     "VRChat",
+     "防音"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "Kuraya式防音室&拡声器ギミック"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 6322146,
+    "name": "【Blender】 かわいい拡声器 kawaii loudspeaker【VRChat】",
+    "url": "https://booth.pm/ja/items/6322146",
+    "category": "3D小道具",
+    "tags": [
+     "かわいい",
+     "Blender",
+     "VRChat"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "【Blender】 かわいい拡声器 kawaii loudspeaker【VRChat】"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 5126220,
+    "name": "メガホン 3Dモデル",
+    "url": "https://booth.pm/ja/items/5126220",
+    "category": "3D小道具",
+    "tags": [
+     "教師",
+     "Blender",
+     "イベント",
+     "学校",
+     "運動会",
+     "体育教師",
+     "メガホン",
+     "うるさい",
+     "拡声器",
+     "風紀委員",
+     "VRChat",
+     "VRChat可",
+     "VRChat向け",
+     "blender3d",
+     "blenderプロジェクトファイル",
+     "blender形式",
+     "やかましい"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "メガホン 3Dモデル"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 8522969,
+    "name": "【MA対応】 イベントメガホン / Event Megaphone V1.0（VRC用小道具/ギミック/プロップ）",
+    "url": "https://booth.pm/ja/items/8522969",
+    "category": "3D小道具",
+    "tags": [
+     "モチーフ",
+     "3D",
+     "かわいい",
+     "コスプレ",
+     "Blender",
+     "音声",
+     "服飾",
+     "おしゃれ",
+     "かっこいい",
+     "カジュアル",
+     "ファッション",
+     "イベント",
+     "コスチューム",
+     "学校",
+     "Unity",
+     "装飾",
+     "3Dモデル",
+     "会議",
+     "会社",
+     "チャイム",
+     "MTG",
+     "効果音",
+     "ベル",
+     "小道具",
+     "メガホン",
+     "桔梗",
+     "教会",
+     "しなの",
+     "応援団",
+     "応援",
+     "改変可",
+     "お得",
+     "対応",
+     "拡声器",
+     "便利",
+     "スタッフ",
+     "調整",
+     "演技",
+     "サポーター",
+     "企業",
+     "チーム",
+     "シェイプ",
+     "マテリアル",
+     "装備",
+     "ギミック",
+     "ベリル",
+     "森羅",
+     "イベント運営",
+     "VRChat",
+     "アナウンス",
+     "茶番",
+     "コス",
+     "VRC想定モデル",
+     "改変",
+     "maya",
+     "運営",
+     "Megaphone",
+     "パフォーマンス",
+     "鐘",
+     "Costume",
+     "シェイプキー",
+     "BlendShape",
+     "通知",
+     "差し替え",
+     "Nemo",
+     "Bodyset2",
+     "対応衣装",
+     "Bodyset2対応",
+     "メガフォン",
+     "ModularAvatar",
+     "MA対応",
+     "ModularAvatar対応",
+     "まめひなた",
+     "VRC想定衣装",
+     "梵鐘",
+     "マヌカ",
+     "モノチ",
+     "Monochi",
+     "キプフェル",
+     "法人",
+     "Nemo対応",
+     "エルシオン",
+     "アルエ",
+     "Alue",
+     "リナシータ",
+     "Rinasciita",
+     "リナシータ対応",
+     "Rinasciita対応",
+     "モノチ対応",
+     "変形装着",
+     "説明会"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "【MA対応】 イベントメガホン / Event Megaphone V1.0（VRC用小道具/ギミック/プロップ）"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   },
+   {
+    "id": 5886159,
+    "name": "【XWear FBX GLB 38色】ラウドブースター メガホン Megaphone",
+    "url": "https://booth.pm/ja/items/5886159",
+    "category": "3D小道具",
+    "tags": [
+     "3D",
+     "アクセサリー",
+     "素材",
+     "銃",
+     "3DCG",
+     "小物",
+     "楽器",
+     "Unity",
+     "ゲーム素材",
+     "3Dキャラクター",
+     "3Dモデル",
+     "ゲーム制作",
+     "小道具",
+     "メガホン",
+     "ゲーム制作者向け",
+     "マイク",
+     "FBX",
+     "拡声器",
+     "3d素材",
+     "アセット",
+     "accessory",
+     "VRChat",
+     "小物系",
+     "fbxモデル",
+     "UnityPackage",
+     "VRChat可",
+     "3dモデル 小物",
+     "Cluster",
+     "unity3d",
+     "VRC想定モデル",
+     "3D用オブジェクト",
+     "glTF",
+     "vrchat model",
+     "fbx形式",
+     "vrcHAT利用可",
+     "vrchat向け",
+     "vrchatアクセサリー",
+     "PA",
+     "Cluster対応",
+     "glb",
+     "speaker",
+     "unity3D",
+     "Cluster用アイテム",
+     "accessoires",
+     "fbxオブジェクト",
+     "Cluster可",
+     "props for 3d model",
+     "game asset",
+     "小物素材",
+     "gltf",
+     "mic",
+     "accesory",
+     "props for vrchat avatar",
+     "assetes",
+     "props for vrc",
+     "props for vrchat",
+     "accesories",
+     "accessory vrchat",
+     "liltoon",
+     "speakers",
+     "lilToon",
+     "fbx accessory",
+     "props-assets",
+     "props-game",
+     "game assets",
+     "prop vtuber",
+     "props vtuber",
+     "megaphone",
+     "accessories for vrchat",
+     "glb形式",
+     "小物3D",
+     "XWear",
+     "XWear形式",
+     "XWEAR",
+     "Xwear対応",
+     "liltoon shader"
+    ],
+    "detail_status": "available",
+    "relevance_status": "related",
+    "relevance_evidence": {
+     "field": "name",
+     "quote": "【XWear FBX GLB 38色】ラウドブースター メガホン Megaphone"
+    },
+    "via": "关键词",
+    "manual_relevance": null
+   }
+  ]
+ }
+}

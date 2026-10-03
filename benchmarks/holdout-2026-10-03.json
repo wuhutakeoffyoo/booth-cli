@@ -1,0 +1,5 @@
+{
+  "description": "Six native Japanese targets frozen before this release's live acceptance; excluded from the preceding two word lists. This is a small acceptance sample, not a population accuracy estimate.",
+  "count": 6,
+  "words": ["懐中時計", "ローラースケート", "ペストマスク", "キセル", "ソーダフロート", "レッグウォーマー"]
+}

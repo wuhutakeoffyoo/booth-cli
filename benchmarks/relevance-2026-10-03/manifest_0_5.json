@@ -1,0 +1,23 @@
+{
+  "identity": {
+    "dataset_sha256": "038daf9d91b9d87f3bd2c8b610050f034d5061b6b23cf0e7ce415081c8e24697",
+    "bot_revision": "d1f32fa648885d0a7ad3585ae5ab4fff40f96107",
+    "bot_semantic_fingerprint": "aed3882307d87fdc178028ca3956e86373512929ba68feef6c6092b0d9966b14",
+    "configuration_fingerprint": "fc532dadc8394b361aee9e10c759fe22f2ed7369457787cb042310749a0f242d",
+    "cli_version": "1.5.2",
+    "cli_semantic_fingerprint": "26dfbac676005a176e245e5d938d37c09a9984f4fe7307fcef85cc32f388951a",
+    "cache_version": "12",
+    "profile": "benchmark",
+    "ai_enabled": true,
+    "requested_model": "glm-5.3-flash",
+    "request_budget": 12,
+    "retry_request_budget": 18,
+    "query_timeout": 180,
+    "range": [
+      0,
+      5
+    ]
+  },
+  "started_at": "2026-10-03T02:13:04.953876+00:00",
+  "scoring": "manual labels required; availability is not relevance; no scarcity adjustment"
+}

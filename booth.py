@@ -46,7 +46,7 @@ import request_budget
 import uuid
 import search_evidence
 
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 
 BASE = "https://booth.pm"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -802,9 +802,11 @@ def cmd_smart(args):
         terms = smart_search.build_search_terms(kws)
 
     # 3) 分词合并搜索 → 有上限的完整详情 → 来源证据评估 → 可选二轮
-    used_terms = terms or [query]
+    used_terms = search_evidence.retrieval_terms(query, terms, smart_search.INDUSTRY_SYNONYMS) or [query]
     merged, first_res, last_err = _merged_search(used_terms, args)
-    if not merged and terms:
+    merged = search_evidence.rank_target(merged, query, smart_search.INDUSTRY_SYNONYMS, desc_kws)
+    if not merged and terms and search_evidence.normalized(query) not in {
+            search_evidence.normalized(term) for term in used_terms}:
         # 方案词无果，退回原词直搜
         merged, first_res2, last_err = _merged_search([query], args)
         if merged and first_res2 and first_res2.get("total"):
@@ -841,17 +843,16 @@ def cmd_smart(args):
                     except Exception as e2:
                         print(f"[eval] 二轮重新规划失败: {e2}", file=sys.stderr)
                         terms2 = []
-                previous = {str(term).casefold() for term in used_terms}
-                terms2 = [term for term in terms2 if str(term).casefold() not in previous][:3]
+                terms2 = search_evidence.retrieval_terms(query, terms2, smart_search.INDUSTRY_SYNONYMS,
+                                                       previous=used_terms, limit=3)
                 if terms2:
                     merged2, first_res2, _ = _merged_search(terms2, args)
                     if merged2:
-                        seen = {it["id"] for it in merged2}
-                        merged = merged2 + [it for it in merged
-                                            if it["id"] not in seen]
+                        merged = search_evidence.merge_rounds(merged, merged2, query,
+                                                             smart_search.INDUSTRY_SYNONYMS, desc_kws)
                         if first_res2 and first_res2.get("total"):
                             first_res = first_res2
-                        used_terms = terms2
+                        used_terms = list(dict.fromkeys(used_terms + terms2))
                         try:
                             fresh = [it for it in merged if not it.get("detail_status")][:3]
                             _enrich_details(fresh, desc_len=-1)
@@ -865,11 +866,12 @@ def cmd_smart(args):
                                          "两轮搜索后仍未完全确认，以下为最接近的结果")
                         except Exception as e2:
                             print(f"[eval] 第二轮评估失败: {e2}", file=sys.stderr)
-                            eval_note = "已完成第二轮搜索"
+                            eval_note = "第二轮相关性评估暂不可用，以下候选尚未核实"
                 else:
                     eval_note = "未得到新的有效检索词，以下候选尚未完全核实"
         except Exception as e:
             print(f"[eval] 结果评估失败（按第一轮返回）: {e}", file=sys.stderr)
+            eval_note = "相关性评估暂不可用，以下候选尚未核实"
     web_note = ""
     if not merged and not args.no_webfind:
         import os
@@ -920,7 +922,10 @@ def cmd_smart(args):
                      if n_hit else "商品说明未提供可确认的兼容性证据，按关键词相关度展示")
     for item in merged:
         item.setdefault("relevance_status", "unknown")
-    merged = search_evidence.promote_evidence(merged)
+    merged, quality = search_evidence.select_results(merged, query, smart_search.INDUSTRY_SYNONYMS,
+                                                   desc_kws, assessed=bool(backend), display_limit=args.limit)
+    selection_note = (f"已隐藏 {quality['omitted']} 件缺乏相关证据或不满足要求的候选，结果不足时不补满"
+                      if quality["omitted"] else "")
     items = [{k: v for k, v in it.items() if k != "_desc"}
              for it in merged[:args.limit]]
 
@@ -932,6 +937,7 @@ def cmd_smart(args):
             "eval_note": eval_note or None,
             "sort_note": sort_note or None, "ai_note": ai_note or None,
             "web_note": web_note or None,
+            "selection_note": selection_note or None, "quality": quality,
             "total": total, "count": len(items), "has_next": has_next,
             "items": items,
         }, ensure_ascii=False, indent=2))
@@ -941,6 +947,8 @@ def cmd_smart(args):
         head += f"\n检索词: {' / '.join(terms[:3])}"
     if eval_note:
         head += f"\n{eval_note}"
+    if selection_note:
+        head += f"\n{selection_note}"
     if desc_note:
         head += f"\n{desc_note}"
     if web_note:

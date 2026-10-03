@@ -24,6 +24,10 @@ Booth.pm（BOOTH 同人/VRChat 素材市场）的命令行搜索工具，为 AI 
   `Retry-After` 感知退避重试、磁盘缓存 + 全局限速；smart 的 AI 主/兜底双后端
   （与 bot 同名环境变量）。所有降级如实告知用户。
 
+## 1.5.2 更新
+
+文字智能搜索保留短目标原词，过滤模型输出的泛化检索词；二轮合并保留已有详情和相关性证据，已核实候选优先。找到明确相关候选或完整原词候选后，结果不足时不再用未核实商品补满。评估不可用时保留少量未核实建议并注明限制。实现、降级规则及评测边界见 [SEARCH_QUALITY.md](SEARCH_QUALITY.md)。
+
 ## 1.5.1 更新
 
 默认使用通用 API：填入 `AI_API_KEY + AI_BASE_URL` 自动发现模型，模型列表不可用时补填 `AI_MODEL`。支持 OpenAI 兼容、Anthropic 与 Gemini 协议，旧 VISION_* 兼容，新连接不继承旧模型名。网页搜索独立使用 `SEARCH_API_KEY + SEARCH_BASE_URL`，支持通用 JSON、Exa、Tavily、Brave、SearXNG 与自定义适配器，不绑定 OpenCode/GLM 或 Exa。配置与图片流程图见 [AI_SETUP.md](AI_SETUP.md)。
