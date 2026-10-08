@@ -423,7 +423,7 @@ def plan_search(text: str, *, base_url: str, api_key: str, model: str,
             "max_tokens": 2000,
         }
         payload.update(search_evidence.structured_options(model))
-        content = _chat_api_call(url, payload, api_key, timeout)
+        content = _llm_request(url, payload, api_key, timeout)
         kws, dkws, translated = parse_plan(content)
         if kws and re.search(r"\{.*\}", content, re.S):
             return kws, dkws, translated
@@ -447,7 +447,7 @@ def evaluate_results(query: str, keywords: list, titles: list, *,
         "max_tokens": 2000,
     }
     payload.update(search_evidence.structured_options(model, evaluation=True))
-    return validate_evaluation(parse_evaluation(_chat_api_call(url, payload, api_key, timeout)), titles)
+    return validate_evaluation(parse_evaluation(_llm_request(url, payload, api_key, timeout)), titles)
 
 
 # ---------------------------------------------------------------- AI 后端
@@ -551,7 +551,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _AUTH_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
-def _chat_api_call(url: str, payload: dict, api_key: str, timeout: int,
+def _llm_request(url: str, payload: dict, api_key: str, timeout: int,
                retries: int = 2) -> str:
     """POST chat/completions，传输类/5xx 错误自动重试，返回回复文本。
     UA 用浏览器标识：Cloudflare WAF 会拦数据中心 IP + python 默认 UA 的大 body POST。
@@ -639,7 +639,7 @@ def translate_keywords(text: str, *, base_url: str, api_key: str, model: str,
             "temperature": 0.2,
             "max_tokens": 2000,
         }
-        content = _chat_api_call(url, payload, api_key, timeout)
+        content = _llm_request(url, payload, api_key, timeout)
         kws, dkws = parse_translation(content)
         if kws and re.search(r"\{.*\}", content, re.S):
             return kws, dkws
@@ -659,7 +659,7 @@ def recall_products(desc: str, *, base_url: str, api_key: str, model: str,
         "temperature": 0.3,
         "max_tokens": 2000,
     }
-    return parse_recall(_chat_api_call(url, payload, api_key, timeout))
+    return parse_recall(_llm_request(url, payload, api_key, timeout))
 
 
 # ---------------------------------------------------------------- 网络检索兜底

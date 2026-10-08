@@ -43,7 +43,7 @@ class TestAuditRegression(unittest.TestCase):
         opener = urllib.request.build_opener(smart_search._NoRedirect, Wire)
         with mock.patch.object(smart_search, "_AUTH_OPENER", opener):
             with self.assertRaises(smart_search.AiError):
-                smart_search._chat_api_call("https://api.invalid/chat", {}, "placeholder", 1)
+                smart_search._llm_request("https://api.invalid/chat", {}, "placeholder", 1)
             self.assertEqual(len(seen), 1)
             self.assertEqual(seen[0].get_header("Authorization"), "Bearer placeholder")
             seen.clear()
