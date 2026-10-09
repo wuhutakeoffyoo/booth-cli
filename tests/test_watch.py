@@ -84,7 +84,9 @@ class TestWishStore(unittest.TestCase):
         self.assertEqual(json.loads(buf2.getvalue())["changed"], [])
 
     def test_unavailable_store_degrades(self):
-        booth.WISH_DB_PATH = Path("Z:/no/such/dir/wish.sqlite3")
+        # NUL 字节路径在 Windows/Linux 上都无法创建——OS 无关的「存储不可用」模拟
+        # （用不存在的盘符在 Linux 上是合法相对路径，mkdir 会成功，测不出降级）
+        booth.WISH_DB_PATH = Path("Z:/no/such/\x00dir/wish.sqlite3")
         booth._WISH_CONN = None
         self.assertEqual(booth.wish_ids(), set())  # 搜索标记静默降级
         argv = booth.build_parser().parse_args(["watch", "list"])
@@ -128,6 +130,7 @@ class TestWishStore(unittest.TestCase):
                      "is_sold_out INTEGER, updated_at TEXT, added_at REAL, last_checked REAL)")
         conn.execute("INSERT INTO watch (id, name, price) VALUES (55, 'legacy', 100)")
         conn.commit()
+        conn.close()  # 关闭旧连接再重开（未关闭会占住文件，Windows 下 tempdir 清理失败）
         booth._WISH_CONN = None  # 触发重新打开（执行迁移）
         booth._wish_db()
         self.assertIn(55, booth.wish_ids())
