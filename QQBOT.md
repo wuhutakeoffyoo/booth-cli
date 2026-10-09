@@ -18,7 +18,7 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 
 | 字段 | 说明 |
 |---|---|
-| `action` | `workflow` / `search` / `item` / `shop` / `imgsearch` / `smart` / `version` |
+| `action` | `workflow` / `search` / `item` / `shop` / `imgsearch` / `smart` / `watch` / `own` / `version` |
 | `params` | 与 CLI 旗标同名的 snake_case 参数（`--or-word` → `"or_word"`，`--no-cache` → `"no_cache": true`） |
 | 平铺写法 | 也接受 `{"action":"search","query":"...","limit":5}` 直接把参数平铺在顶层 |
 | `context` | 1.4.0 起可选：request_id、max_requests、deadline，多个子进程共享同次查询的出站上限 |
@@ -32,6 +32,12 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
 - `workflow`：`query`（原始需求字符串）、`keyword[]`（最多六个完整轴）、`require_term[]`、`sort`、`adult`、`no_vrc`、`page`、`limit`（1-6）、`desc_len`、`no_cache`。`schema:true` 离线查看契约。默认只访问 BOOTH，返回来源说明/规格/精确图片地址与缺失状态，相关性和适配均待调用者核查。
 - `smart`：`query`、`sort`、`adult`、`no_vrc`、`page`、`limit`、`delegate_ai`、`no_ai`、`no_webfind`、`no_cache`。默认本地词扩展；只有 `delegate_ai:true` 才读 CLI 进程的 AI 配置做内部规划/评估。存在密钥也不会自动启用。委托模式建议总超时 180s。
 - `item`：`id`（数字/字符串/URL）、`desc_len`、`full`、`no_cache`
+- `watch`：`op`（add/list/remove/check）、`ids[]`（商品 ID 或 URL，add/remove 必填）。
+  本地关注清单与变动检查（价格/补货/商品更新）；`check` 逐项拉详情（≥1s 限速，
+  单轮默认上限 30 项），超时建议按清单大小给足。存储路径 `BOOTH_WISH_DB` 可覆盖
+- `own`：参数同 watch。已购清单（本地个人素材库）；bot 作为多用户服务通常不暴露
+  个人已购——该 action 供本机脚本/框架自用。搜索结果的 `watched`/`owned` 字段
+  在 CLI 与 bot 同机部署时对 bot 结果同样生效
 - `shop`：`shop`（子域名或 URL）、`pages`、`no_cache`
 - `imgsearch`：`image`（本地路径；URL 会先下载）、`engine`（默认 bing,ascii2d）、
   `headless`、`wait_s`、`limit`、`no_cache`、`delegate_ai`。须显式 `delegate_ai:true`。**注意慢**：浏览器备援路径可达 1-2 分钟，

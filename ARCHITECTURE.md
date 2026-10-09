@@ -265,6 +265,28 @@ AI_MODE=cli：仅显式启用的旧文字模式，不作为默认 API 失败后�
 > 用默认路径（同机子进程自然共享）。bot 对 CLI 的预算上限（12/18）是硬约束，超限时明确
 > 报错而非静默放宽。
 
+### 5.2 关注/已购清单与变动提醒（watch/own，2026-10 新增）
+
+借鉴 [MioVRC_AssetManager](https://github.com/CokoIya/MioVRC_AssetManager) 的
+已购标记与 Booth 更新检查。**分工原则：已购素材库是本地个人数据 → CLI；
+降价/变动提醒推送是多用户服务 → bot。**
+
+- **存储**：单表 `library(kind, id, ...)`（本机 sqlite，`BOOTH_WISH_DB` 可覆盖），
+  kind 全程参数绑定（watch=关注等降价 / own=已购素材库）；同一商品可同时
+  已购+关注；旧版单 watch 表自动迁移。存储不可用时搜索标记静默降级。
+- **CLI `booth watch|own add/remove/list/check`**（`_cmd_library` 共用实现）：
+  快照 name/price/is_sold_out/updated_at；`check` 逐项 no_cache 拉详情对比，
+  产出降价/涨价/补货/售罄/商品更新/改名变动；own 的 check 文案偏重「商品更新」
+  （已购作者发新版可免费重下）。单轮上限 `BOOTH_WATCH_CHECK_LIMIT`（默认 30），
+  出站计入共享请求预算。
+- **搜索标记**：search/smart 的 items 命中清单时带 `watched`/`owned`
+  （文本 ♥已关注 / 🛒已购）。
+- **bot `/vrc watch`**：add/list/check/remove 指令（信封 watch action，
+  ids 位置参数透传）；`WATCH_ENABLED` 开启后 asyncio 后台循环定时 check
+  （间隔 ≥600s），有变动时推送 `WATCH_NOTIFY_GROUPS`（空则群白名单）。
+  bot 不提供 own 指令——多用户服务不持有个人已购数据。
+- 信封新增 `watch`/`own` action（`_BOT_EXTRA_POSITIONAL` 机制：ids[] 转多位置参数）。
+
 ## 6. 参考的开源项目
 
 ### 直接借鉴（协议与机制）

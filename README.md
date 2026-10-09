@@ -123,6 +123,12 @@ Bot 可通过 JSON context 传入 `request_id / max_requests / deadline`。各 C
 - **关键词搜索 / 商品详情 / 商店查询**：结构化 `--json` 输出，为 AI agent 调用设计。
   search/smart **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`--no-vrc` 搜全站）；
   popularity 排序翻页时自动切新着并标注（Booth 站点忽略 popularity 下的 page 参数）。
+- **关注/已购清单（`booth watch` / `booth own`，借鉴 MioVRC_AssetManager 的
+  已购标记/更新检查）**：本地 sqlite 快照（kind 单表，`BOOTH_WISH_DB` 可覆盖）；
+  watch=关注等降价（check 查价格/补货），own=已购素材库（check 偏重商品更新，
+  作者发新版免费重下）；search/smart 结果自动标记（`owned`/`watched` 字段 +
+  文本 🛒已购/♥已关注）。**分工原则：已购是本地个人数据归 CLI，降价提醒推送
+  归 bot（多用户服务）**。数据只存本机，检查出站走 booth.pm 白名单与共享请求预算。
 - **bot 接入钩子**：`booth bot` JSON 信封接口（子进程进出、退出码恒 0、永不抛栈），
   NoneBot/Koishi/Yunzai 等框架均可直接接，见 [QQBOT.md](QQBOT.md)；
   配套 NoneBot 实现：[vrc-booth-bot](https://github.com/wuhutakeoffyoo/vrc-booth-bot)（VRC 对口）。
@@ -179,6 +185,19 @@ booth search "" --tag VRChat --tag アバター --adult only   # 标签/成人�
 # 商品详情（含收藏数、标签、规格、简介、图片）
 booth item 5813187 --json
 booth item https://booth.pm/ja/items/5813187
+
+# 关注清单（本地 sqlite）：降价/补货/商品更新变动检查；搜索结果自动带 ♥ 标记
+booth watch add 5813187 https://booth.pm/ja/items/3368697
+booth watch list --json
+booth watch check            # 逐项拉最新详情对比快照（≥1s 限速，单轮默认 ≤30 项）
+booth watch remove 5813187
+
+# 已购清单（本地素材库，个人数据只存本机）：搜索结果带 🛒 标记；
+# check 偏重商品更新——已购商品作者发新版可免费重下（对应 MioVRCA 的更新检查）
+booth own add 3368697
+booth own list
+booth own check
+booth own remove 3368697
 
 # 商店信息与最新商品
 booth shop mukumi --json

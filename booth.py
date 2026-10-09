@@ -281,8 +281,9 @@ def get_html(url, cache_ttl=CACHE_TTL_PAGE):
     return text, final_url
 
 
-def get_json(url, csrf=None):
-    data, _, _ = http_get(url, json_accept=True, csrf=csrf, cache_ttl=CACHE_TTL_ITEM)
+def get_json(url, csrf=None, cache_ttl=None):
+    data, _, _ = http_get(url, json_accept=True, csrf=csrf,
+                          cache_ttl=CACHE_TTL_ITEM if cache_ttl is None else cache_ttl)
     return json.loads(data.decode("utf-8", errors="replace"))
 
 
@@ -448,15 +449,16 @@ def parse_search_page(page_html):
 
 # ---------------------------------------------------------------- 商品详情
 
-def fetch_item(item_id, lang="ja"):
-    """单品 JSON；被拒时先取 HTML 页拿 csrf 再重试。"""
+def fetch_item(item_id, lang="ja", no_cache=False):
+    """单品 JSON；被拒时先取 HTML 页拿 csrf 再重试。no_cache 跳过内容缓存。"""
     url = f"{BASE}/{lang}/items/{item_id}.json"
+    ttl = 0 if no_cache else None
     try:
-        return get_json(url)
+        return get_json(url, cache_ttl=ttl)
     except BoothError:
         page_html, _ = get_html(f"{BASE}/{lang}/items/{item_id}")
         csrf_m = re.search(r'name="csrf-token" content="([^"]+)"', page_html)
-        return get_json(url, csrf=csrf_m.group(1) if csrf_m else None)
+        return get_json(url, csrf=csrf_m.group(1) if csrf_m else None, cache_ttl=ttl)
 
 
 def trim_item(raw, desc_len=DEFAULT_DESC_LEN):
@@ -535,6 +537,238 @@ def parse_shop_page(page_html):
 
 
 # ---------------------------------------------------------------- 命令
+
+# 关注清单（watch）与已购清单（own）：本地 sqlite 快照 + 变动检查。
+# 分工：own=已购素材库（本地个人数据，CLI 专属——bot 是多用户服务不持有个人已购）；
+# watch=关注等降价（check 查价格/补货）；own 的 check 偏重商品更新（对应
+# MioVRCA 的「Booth 更新检查」——已购作者发新版可免费重下）。
+# 数据只存本机（BOOTH_WISH_DB 可覆盖路径）；出站仍走 http_get 的 booth.pm
+# 白名单与共享请求预算，无新增外部端点。
+WISH_DB_PATH = Path(os.environ.get("BOOTH_WISH_DB",
+                                   str(Path.home() / ".booth-cli" / "wishlist.sqlite3")))
+WATCH_CHECK_LIMIT = int(os.environ.get("BOOTH_WATCH_CHECK_LIMIT", "30") or 30)
+_WISH_CONN = None  # 惰性；False 表示不可用
+
+
+def _wish_db():
+    global _WISH_CONN
+    if _WISH_CONN is None:
+        try:
+            WISH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(WISH_DB_PATH), timeout=2)
+            # 单表 + kind 数据列（watch=关注等降价 / own=已购素材库）：
+            # kind 全程作为 execute 参数绑定，SQL 结构为固定字符串
+            conn.execute("CREATE TABLE IF NOT EXISTS library ("
+                         "kind TEXT NOT NULL, id INTEGER NOT NULL, name TEXT, "
+                         "price INTEGER, is_sold_out INTEGER, updated_at TEXT, "
+                         "added_at REAL, last_checked REAL, "
+                         "PRIMARY KEY (kind, id))")
+            try:  # 迁移旧版单 watch 表（一次性，迁完即删防复活）
+                conn.execute("INSERT OR IGNORE INTO library "
+                             "(kind, id, name, price, is_sold_out, updated_at, added_at, last_checked) "
+                             "SELECT 'watch', id, name, price, is_sold_out, updated_at, added_at, last_checked "
+                             "FROM watch")
+                conn.execute("DROP TABLE watch")
+            except sqlite3.Error:
+                pass
+            _WISH_CONN = conn
+        except Exception:
+            _WISH_CONN = False
+    return _WISH_CONN if _WISH_CONN else None
+
+
+def _library_ids(kind: str) -> set:
+    """清单 ID 集合；存储不可用时返回空集（功能静默降级，不影响搜索）。"""
+    conn = _wish_db()
+    if not conn:
+        return set()
+    try:
+        return {r[0] for r in conn.execute(
+            "SELECT id FROM library WHERE kind = ?", (kind,))}
+    except sqlite3.Error:
+        return set()
+
+
+def wish_ids():
+    """已关注商品 ID 集合。"""
+    return _library_ids("watch")
+
+
+def own_ids():
+    """已购商品 ID 集合（本地素材库标记，CLI 专属）。"""
+    return _library_ids("own")
+
+
+def _wish_snapshot(raw):
+    shop = raw.get("shop") or {}
+    return {
+        "id": raw.get("id"),
+        "name": raw.get("name") or shop.get("name") or "",
+        "price": raw.get("price"),
+        "is_sold_out": 1 if raw.get("is_sold_out") else 0,
+        "updated_at": raw.get("updated_at"),
+    }
+
+
+def _wish_changes(old_row, snap):
+    """对比快照与库内记录（old_row: id,name,price,is_sold_out,updated_at），返回变动描述。"""
+    changes = []
+    if old_row is None:
+        return changes
+    if snap["price"] is not None and old_row[2] is not None \
+            and snap["price"] != old_row[2]:
+        arrow = "↓" if snap["price"] < old_row[2] else "↑"
+        changes.append(f"价格 {old_row[2]:,} → {snap['price']:,} 円（{arrow}）")
+    if bool(snap["is_sold_out"]) != bool(old_row[3]):
+        changes.append("已补货上架" if not snap["is_sold_out"] else "已售罄")
+    if snap["updated_at"] and old_row[4] and snap["updated_at"] != old_row[4]:
+        changes.append(f"商品有更新（{snap['updated_at'][:10]}）")
+    if snap["name"] and old_row[1] and snap["name"] != old_row[1]:
+        changes.append(f"改名：{old_row[1]} → {snap['name']}")
+    return changes
+
+
+def _cmd_library(args, kind: str):
+    """watch/own 共用实现：kind 为 'watch'（关注等降价）或 'own'（已购素材库）。"""
+    op = (getattr(args, "op", None) or "list").strip().lower()
+    label = "已购" if kind == "own" else "关注"
+    icon = "🛒" if kind == "own" else "♥"
+    conn = _wish_db()
+    if not conn:
+        raise BoothError(f"{label}清单存储不可用: {WISH_DB_PATH}")
+    ids_arg = [parse_item_id(x) for x in (getattr(args, "ids", None) or [])]
+
+    if op in ("add", "rm", "remove", "del"):
+        removing = op != "add"
+        if not ids_arg:
+            raise BoothError(f"用法: booth {'own' if kind == 'own' else 'watch'} "
+                             f"{'remove' if removing else 'add'} <商品ID|URL>...")
+        results = []
+        for iid in ids_arg:
+            if removing:
+                cur = conn.execute("DELETE FROM library WHERE kind = ? AND id = ?",
+                                   (kind, int(iid)))
+                results.append({"id": int(iid), "removed": cur.rowcount > 0})
+                continue
+            old = conn.execute("SELECT id, name, price, is_sold_out, updated_at "
+                               "FROM library WHERE kind = ? AND id = ?",
+                               (kind, int(iid))).fetchone()
+            raw = fetch_item(iid, "ja")  # 快照取详情（走缓存）
+            snap = _wish_snapshot(raw)
+            conn.execute("INSERT OR REPLACE INTO library "
+                         "(kind, id, name, price, is_sold_out, updated_at, added_at, last_checked) "
+                         "VALUES (?,?,?,?,?,?,?,?)",
+                         (kind, snap["id"], snap["name"], snap["price"], snap["is_sold_out"],
+                          snap["updated_at"], time.time(), time.time()))
+            results.append({"id": snap["id"], "name": snap["name"],
+                            "price": snap["price"], "already": old is not None})
+        conn.commit()
+        if args.json:
+            print(json.dumps({"op": "remove" if removing else "add", "kind": kind,
+                              "count": len(results), "results": results},
+                             ensure_ascii=False, indent=2))
+            return
+        for r in results:
+            if removing:
+                print(f"#{r['id']} {'已移除' if r['removed'] else f'不在{label}清单中'}")
+            else:
+                tag = f"（已在清单，快照已刷新）" if r["already"] else ""
+                price = f"¥{r['price']:,}" if isinstance(r["price"], int) else "价格未知"
+                print(f"{icon} {label} #{r['id']}  {price}  {r['name']}{tag}")
+        return
+
+    if op == "list":
+        rows = conn.execute("SELECT id, name, price, is_sold_out, updated_at, added_at, "
+                            "last_checked FROM library WHERE kind = ? "
+                            "ORDER BY added_at DESC", (kind,)).fetchall()
+        items = [{"id": r[0], "name": r[1], "price": r[2],
+                  "is_sold_out": bool(r[3]), "updated_at": r[4],
+                  "added_at": r[5], "last_checked": r[6]} for r in rows]
+        if args.json:
+            print(json.dumps({"op": "list", "kind": kind, "count": len(items),
+                              "items": items}, ensure_ascii=False, indent=2))
+            return
+        if not items:
+            print(f"{label}清单为空。用法: booth {'own' if kind == 'own' else 'watch'} add <商品ID|URL>")
+            return
+        print(f"{label}清单 {len(items)} 件：")
+        for it in items:
+            price = f"¥{it['price']:,}" if isinstance(it["price"], int) else "价格未知"
+            sold = "  [已售罄]" if it["is_sold_out"] else ""
+            print(f"{icon} #{it['id']}  {price}{sold}  {it['name']}")
+        return
+
+    if op == "check":
+        rows = conn.execute("SELECT id, name, price, is_sold_out, updated_at, added_at, "
+                            "last_checked FROM library WHERE kind = ? "
+                            "ORDER BY last_checked ASC", (kind,)).fetchall()
+        if not rows:
+            if args.json:
+                print(json.dumps({"op": "check", "kind": kind, "checked": 0,
+                                  "changed": [], "errors": []}, ensure_ascii=False, indent=2))
+            else:
+                print(f"{label}清单为空，无需检查。")
+            return
+        rows = rows[:max(1, WATCH_CHECK_LIMIT)]  # 单轮出站上限（每项 ≥1s 限速）
+        changed, errors = [], []
+        for r in rows:
+            try:
+                raw = fetch_item(str(r[0]), "ja", no_cache=True)
+                snap = _wish_snapshot(raw)
+                diffs = _wish_changes(r, snap)
+                conn.execute("UPDATE library SET name=?, price=?, is_sold_out=?, "
+                             "updated_at=?, last_checked=? WHERE kind=? AND id=?",
+                             (snap["name"], snap["price"], snap["is_sold_out"],
+                              snap["updated_at"], time.time(), kind, snap["id"]))
+                if diffs:
+                    changed.append({"id": snap["id"], "name": snap["name"],
+                                    "price": snap["price"], "changes": diffs})
+            except BoothError as e:
+                errors.append({"id": r[0], "error": str(e)[:120]})
+        conn.commit()
+        if args.json:
+            print(json.dumps({"op": "check", "kind": kind, "checked": len(rows),
+                              "changed": changed, "errors": errors,
+                              "limit": WATCH_CHECK_LIMIT},
+                             ensure_ascii=False, indent=2))
+            return
+        if not changed and not errors:
+            if kind == "own":
+                print(f"已检查 {len(rows)} 件已购商品，暂无更新。")
+            else:
+                print(f"已检查 {len(rows)} 件关注商品，暂无变动。")
+        for c in changed:
+            price = f"¥{c['price']:,}" if isinstance(c["price"], int) else ""
+            head_icon = "🔄" if kind == "own" else "🔎"
+            print(f"{head_icon} #{c['id']}  {c['name']}  {price}")
+            for d in c["changes"]:
+                print(f"    {d}")
+        for e in errors:
+            print(f"⚠ #{e['id']} 检查失败: {e['error']}")
+        return
+
+    raise BoothError(f"未知子命令: {op!r}（支持 add / remove / list / check）")
+
+
+def cmd_watch(args):
+    _cmd_library(args, "watch")
+
+
+def cmd_own(args):
+    _cmd_library(args, "own")
+
+
+def _mark_watched(items):
+    """给搜索结果打本地清单标记（watched=♥关注 / owned=🛒已购；不改变排序）。"""
+    watching, owned = wish_ids(), own_ids()
+    if not watching and not owned:
+        return
+    for it in items:
+        if it.get("id") in watching:
+            it["watched"] = True
+        if it.get("id") in owned:
+            it["owned"] = True
+
 
 def build_search_url(args):
     lang = args.lang
@@ -619,6 +853,7 @@ def cmd_search(args):
         if offset < args.pages - 1:
             time.sleep(PAGE_DELAY)
     items = items[:args.limit]
+    _mark_watched(items)
 
     if args.json:
         print(json.dumps({
@@ -632,7 +867,9 @@ def cmd_search(args):
             print(f"共 {total:,} 件，本次显示 {len(items)} 件{sort_note}\n")
         for it in items:
             price = f"¥{it['price']:,}" if it["price"] is not None else "价格未知"
-            flags = "R-18" if it.get("is_adult") else ""
+            flags = " ".join(filter(None, ["R-18" if it.get("is_adult") else "",
+                                           "🛒已购" if it.get("owned") else "",
+                                           "♥已关注" if it.get("watched") else ""]))
             meta = f"[{it['category']}]" if it.get("category") else ""
             tags = "#" + " #".join(it["tags"]) if it["tags"] else ""
             print(f"#{it['id']}  {price}  {it['shop']['name'] or ''}({it['shop']['subdomain'] or ''})"
@@ -1028,6 +1265,7 @@ def cmd_smart(args):
     items = [dict({k: v for k, v in it.items() if k != "_desc"},
                   description=it.get("_desc") or None)
              for it in merged[:args.limit]]
+    _mark_watched(items)
 
     if args.json:
         print(json.dumps({
@@ -1058,7 +1296,9 @@ def cmd_smart(args):
     print(head + "\n")
     for it in items:
         price = f"¥{it['price']:,}" if it["price"] is not None else "价格未知"
-        flags = "R-18" if it.get("is_adult") else ""
+        flags = " ".join(filter(None, ["R-18" if it.get("is_adult") else "",
+                                       "🛒已购" if it.get("owned") else "",
+                                       "♥已关注" if it.get("watched") else ""]))
         via = f"[{it['via']}]" if it.get("via") else ""
         print(f"#{it['id']}  {price}  {it['shop']['name'] or ''}({it['shop']['subdomain'] or ''})"
               f"  {flags}  {via}")
@@ -1225,9 +1465,12 @@ def _run_imgsearch(args, path, src):
 # 子进程调用 `booth bot '<json>'`（或 stdin 管道），返回统一 JSON 信封，
 # 永不抛栈、退出码恒为 0，ok 字段表达成败。详见 QQBOT.md。
 
-BOT_ACTIONS = ("search", "item", "shop", "imgsearch", "smart", "workflow")
+BOT_ACTIONS = ("search", "item", "shop", "imgsearch", "smart", "workflow", "watch", "own")
 _BOT_POSITIONAL = {"search": "query", "item": "id", "shop": "shop",
-                   "imgsearch": "image", "smart": "query", "workflow": "query"}
+                   "imgsearch": "image", "smart": "query", "workflow": "query",
+                   "watch": "op", "own": "op"}
+# watch/own 的 ids 以多个位置参数形式追加（argparse 位置参数 ids nargs="*"）
+_BOT_EXTRA_POSITIONAL = {"watch": ("ids",), "own": ("ids",)}
 _BOT_LIST_FLAGS = ("tag", "or_word", "exclude", "keyword", "require_term")
 _BOT_BOOL_FLAGS = ("vrc", "no_vrc", "in_stock", "full", "headless", "no_cache",
                    "no_ai", "no_webfind", "delegate_ai", "schema")
@@ -1243,8 +1486,14 @@ def bot_params_to_argv(action, params):
         argv.append(pos)
     elif isinstance(pos, list):
         argv.extend(str(x) for x in pos)
+    for extra in _BOT_EXTRA_POSITIONAL.get(action, ()):  # 如 watch 的 ids[]
+        vals = params.get(extra)
+        if vals is None:
+            continue
+        argv.extend(str(x) for x in (vals if isinstance(vals, list) else [vals]))
     for key, value in params.items():
-        if key in (_BOT_POSITIONAL[action], "action", "json", "params"):
+        if key in (_BOT_POSITIONAL[action], "action", "json", "params") \
+                or key in _BOT_EXTRA_POSITIONAL.get(action, ()):
             continue
         flag = "--" + key.replace("_", "-")
         if key in _BOT_BOOL_FLAGS:
@@ -1439,6 +1688,22 @@ def build_parser():
     pm.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
     add_common(pm)
     pm.set_defaults(func=cmd_smart)
+
+    pw2 = sub.add_parser("watch", help="关注清单：add/list/remove/check（价格·售罄·商品更新变动检查）",
+                         aliases=["w"])
+    pw2.add_argument("op", nargs="?", default="list",
+                     help="add / list / remove / check（默认 list）")
+    pw2.add_argument("ids", nargs="*", help="商品 ID 或 URL（add/remove 必填，可多个）")
+    pw2.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    pw2.set_defaults(func=cmd_watch)
+
+    po = sub.add_parser("own", help="已购清单（本地素材库）：add/list/remove/check（商品更新检查）",
+                        aliases=["o"])
+    po.add_argument("op", nargs="?", default="list",
+                    help="add / list / remove / check（默认 list）")
+    po.add_argument("ids", nargs="*", help="商品 ID 或 URL（add/remove 必填，可多个）")
+    po.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
+    po.set_defaults(func=cmd_own)
 
     pb = sub.add_parser("bot", help="bot 框架接入钩子：JSON 信封进出（见 QQBOT.md）")
     pb.add_argument("payload", nargs="?", help="JSON 请求，如 '{\"action\":\"search\",\"params\":{\"query\":\"VRChat\"}}'；缺省读 stdin")
