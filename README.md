@@ -199,6 +199,9 @@ booth own list
 booth own check
 booth own remove 3368697
 
+# 商品详情 AI 中文化（借鉴 MioVRCA 的中文名翻译；需配置 AI_* 环境变量）
+booth item 3368697 --translate --json   # 输出附 name_zh / desc_zh 字段
+
 # 商店信息与最新商品
 booth shop mukumi --json
 

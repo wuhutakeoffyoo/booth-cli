@@ -31,7 +31,7 @@ echo '{"action":"item","params":{"id":3368697}}' | booth bot
   **默认收窄 VRChat 圈**（自动 `--tag VRChat`，`"no_vrc": true` 搜全站）
 - `workflow`：`query`（原始需求字符串）、`keyword[]`（最多六个完整轴）、`require_term[]`、`sort`、`adult`、`no_vrc`、`page`、`limit`（1-6）、`desc_len`、`no_cache`。`schema:true` 离线查看契约。默认只访问 BOOTH，返回来源说明/规格/精确图片地址与缺失状态，相关性和适配均待调用者核查。
 - `smart`：`query`、`sort`、`adult`、`no_vrc`、`page`、`limit`、`delegate_ai`、`no_ai`、`no_webfind`、`no_cache`。默认本地词扩展；只有 `delegate_ai:true` 才读 CLI 进程的 AI 配置做内部规划/评估。存在密钥也不会自动启用。委托模式建议总超时 180s。
-- `item`：`id`（数字/字符串/URL）、`desc_len`、`full`、`no_cache`
+- `item`：`id`（数字/字符串/URL）、`desc_len`、`full`、`translate`（AI 中文化，附 name_zh/desc_zh）、`no_cache`
 - `watch`：`op`（add/list/remove/check）、`ids[]`（商品 ID 或 URL，add/remove 必填）。
   本地关注清单与变动检查（价格/补货/商品更新）；`check` 逐项拉详情（≥1s 限速，
   单轮默认上限 30 项），超时建议按清单大小给足。存储路径 `BOOTH_WISH_DB` 可覆盖

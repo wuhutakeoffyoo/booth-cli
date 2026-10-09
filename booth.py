@@ -882,12 +882,32 @@ def cmd_item(args):
     item_id = parse_item_id(" ".join(args.id))
     raw = fetch_item(item_id, "ja")
     payload = raw if args.full else trim_item(raw, desc_len=args.desc_len)
+    translate_note = ""
+    if getattr(args, "translate", False):
+        import smart_search
+        backend = smart_search.ai_backend()
+        if not backend:
+            translate_note = "⚠ 未配置 AI（AI_API_KEY 等），跳过翻译"
+        else:
+            try:
+                zh = smart_search.translate_item_info(
+                    payload.get("name") or "",
+                    clean_text(raw.get("description"))[:1200], **backend)
+                payload["name_zh"] = zh["name_zh"] or None
+                payload["desc_zh"] = zh["desc_zh"] or None
+            except Exception as e:
+                import smart_search as _s
+                translate_note = f"⚠ 翻译失败：{_s.friendly_ai_error(e)}"
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     it = trim_item(raw, desc_len=len(clean_text(raw.get("description")))) if args.full else payload
     print(f"#{it['id']}  {it['price']}  {it['shop'].get('name') or ''}({it['shop'].get('subdomain') or ''})")
     print(f"标题: {it['name']}")
+    if it.get("name_zh"):
+        print(f"中文: {it['name_zh']}")
+    if it.get("desc_zh"):
+        print(f"简介(译): {it['desc_zh']}")
     flags = []
     if it.get("is_adult"):
         flags.append("R-18")
@@ -1473,7 +1493,7 @@ _BOT_POSITIONAL = {"search": "query", "item": "id", "shop": "shop",
 _BOT_EXTRA_POSITIONAL = {"watch": ("ids",), "own": ("ids",)}
 _BOT_LIST_FLAGS = ("tag", "or_word", "exclude", "keyword", "require_term")
 _BOT_BOOL_FLAGS = ("vrc", "no_vrc", "in_stock", "full", "headless", "no_cache",
-                   "no_ai", "no_webfind", "delegate_ai", "schema")
+                   "no_ai", "no_webfind", "delegate_ai", "schema", "translate")
 
 
 def bot_params_to_argv(action, params):
@@ -1625,6 +1645,8 @@ def build_parser():
     pi.add_argument("id", nargs="+", help="商品 ID 或 URL")
     pi.add_argument("--desc-len", type=int, default=DEFAULT_DESC_LEN, help="简介截断长度（-1 保留完整正文）")
     pi.add_argument("--full", action="store_true", help="输出原始完整 JSON")
+    pi.add_argument("--translate", action="store_true",
+                    help="AI 翻译商品名与说明为中文（name_zh/desc_zh；需配置 AI）")
     pi.add_argument("--json", action="store_true", help="输出 JSON（AI 推荐）")
     add_common(pi)
     pi.set_defaults(func=cmd_item)

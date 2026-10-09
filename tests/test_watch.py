@@ -123,6 +123,38 @@ class TestWishStore(unittest.TestCase):
         ns_own = booth.build_parser().parse_args(own_argv + ["--json"])
         self.assertEqual(ns_own.op, "add")
 
+    def test_item_translate_flag_and_fallback(self):
+        import io, json as j
+        import smart_search
+        raw = {"id": 1, "name": "テスト衣装", "price": 100,
+               "shop": {"name": "s", "subdomain": "sd"},
+               "description": "<p>対応素体：Rexouium</p>"}
+        zh = {"name_zh": "测试衣装", "desc_zh": "适配 Rexouium"}
+        # 已配置 AI 且翻译成功：JSON 带 name_zh/desc_zh
+        buf = io.StringIO()
+        with mock.patch.object(booth, "fetch_item", return_value=raw), \
+                mock.patch.object(smart_search, "ai_backend",
+                                  return_value={"base_url": "https://api.invalid", "api_key": "k", "model": ""}), \
+                mock.patch.object(smart_search, "translate_item_info", return_value=zh), \
+                mock.patch("sys.stdout", buf):
+            booth.cmd_item(booth.build_parser().parse_args(
+                ["item", "1", "--translate", "--json"]))
+        data = j.loads(buf.getvalue())
+        self.assertEqual(data["name_zh"], "测试衣装")
+        self.assertEqual(data["desc_zh"], "适配 Rexouium")
+        # 翻译失败：降级为原样输出 + 文本提示（不炸）
+        buf2 = io.StringIO()
+        with mock.patch.object(booth, "fetch_item", return_value=raw), \
+                mock.patch.object(smart_search, "ai_backend",
+                                  return_value={"base_url": "https://api.invalid", "api_key": "k", "model": ""}), \
+                mock.patch.object(smart_search, "translate_item_info",
+                                  side_effect=smart_search.AiError(detail="boom")), \
+                mock.patch("sys.stdout", buf2):
+            booth.cmd_item(booth.build_parser().parse_args(
+                ["item", "1", "--translate", "--json"]))
+        data2 = j.loads(buf2.getvalue())
+        self.assertNotIn("name_zh", data2)
+
     def test_legacy_watch_table_migration(self):
         # 旧版单 watch 表迁移到 library(kind='watch') 且旧表被删除
         conn = booth._wish_db()
